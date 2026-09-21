@@ -1,6 +1,6 @@
-#!/usr/bin/env bash
+#!/bin/sh
 
-set -euo pipefail
+set -eu
 
 REPO_URL="https://github.com/agent-dna/boilerplate.git"
 INSTALL_DIR="${HOME}/.agentdna"
@@ -20,24 +20,21 @@ command_exists() {
 }
 
 # -----------------------------------------------------------------------------
-# Determine whether we are running from an existing AgentDNA project.
+# Detect local AgentDNA project
 #
-# This intentionally checks ONLY wizard/__main__.py.
+# Only wizard/__main__.py is used as the local-project marker.
+# If it exists in the current working directory, Git is not used at all.
 # -----------------------------------------------------------------------------
 
-if [[ -f "./wizard/__main__.py" ]]; then
-
-    LOCAL_PROJECT=true
+if [ -f "./wizard/__main__.py" ]; then
+    LOCAL_PROJECT="true"
     PROJECT_DIR="$(pwd)"
 
     log "Existing AgentDNA project detected."
     log "Using local project: ${PROJECT_DIR}"
-
 else
-
-    LOCAL_PROJECT=false
+    LOCAL_PROJECT="false"
     PROJECT_DIR=""
-
 fi
 
 # -----------------------------------------------------------------------------
@@ -48,27 +45,29 @@ if ! command_exists "$PYTHON"; then
     fail "Python 3.10 or newer is required, but '$PYTHON' was not found."
 fi
 
+PYTHON_VERSION="$("$PYTHON" --version 2>&1)"
+log "Using ${PYTHON_VERSION}"
+
 PYTHON_MAJOR="$(
-    "$PYTHON" -c 'import sys; print(sys.version_info.major)'
+    "$PYTHON" -c 'import sys; print(sys.version_info[0])'
 )"
 
 PYTHON_MINOR="$(
-    "$PYTHON" -c 'import sys; print(sys.version_info.minor)'
+    "$PYTHON" -c 'import sys; print(sys.version_info[1])'
 )"
 
-if (( PYTHON_MAJOR < 3 || (PYTHON_MAJOR == 3 && PYTHON_MINOR < 10) )); then
+if [ "$PYTHON_MAJOR" -lt 3 ] ||
+   { [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 10 ]; }; then
     fail "Python 3.10 or newer is required."
 fi
-
-log "Using Python $("$PYTHON" --version 2>&1)"
 
 # -----------------------------------------------------------------------------
 # Local project
 #
-# No Git operations whatsoever.
+# No Git operations are performed in local mode.
 # -----------------------------------------------------------------------------
 
-if [[ "$LOCAL_PROJECT" == true ]]; then
+if [ "$LOCAL_PROJECT" = "true" ]; then
 
     cd "$PROJECT_DIR"
 
@@ -112,21 +111,21 @@ else
         '
     )"
 
-    if [[ -z "$VERSION" ]]; then
+    if [ -z "$VERSION" ]; then
         fail "No stable AgentDNA release was found."
     fi
 
     log "Latest stable release: ${VERSION}"
 
     # -------------------------------------------------------------------------
-    # Prepare installation directory.
+    # Prepare installation directory
     # -------------------------------------------------------------------------
 
-    if [[ -e "$INSTALL_DIR" ]]; then
+    if [ -e "$INSTALL_DIR" ]; then
 
-        if [[ -n "$(find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
+        if [ -n "$(find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
             log "Removing existing AgentDNA installation..."
-            rm -rf -- "$INSTALL_DIR"
+            rm -rf "$INSTALL_DIR"
         fi
 
     fi
@@ -134,7 +133,7 @@ else
     mkdir -p "$(dirname "$INSTALL_DIR")"
 
     # -------------------------------------------------------------------------
-    # Clone the selected stable release.
+    # Clone selected stable release
     # -------------------------------------------------------------------------
 
     log "Downloading AgentDNA..."
@@ -151,11 +150,12 @@ else
     cd "$PROJECT_DIR"
 
     # -------------------------------------------------------------------------
-    # Validate the cloned project.
+    # Validate cloned project
     # -------------------------------------------------------------------------
 
-    [[ -f "wizard/__main__.py" ]] || \
+    if [ ! -f "wizard/__main__.py" ]; then
         fail "Invalid AgentDNA release: wizard/__main__.py not found."
+    fi
 
 fi
 
@@ -163,17 +163,21 @@ fi
 # Validate project
 # -----------------------------------------------------------------------------
 
-[[ -f "pyproject.toml" ]] || \
+if [ ! -f "pyproject.toml" ]; then
     fail "pyproject.toml was not found."
+fi
 
-[[ -f "wizard/__main__.py" ]] || \
+if [ ! -f "wizard/__main__.py" ]; then
     fail "wizard/__main__.py was not found."
+fi
 
-[[ -f "agent.py" ]] || \
+if [ ! -f "agent.py" ]; then
     fail "agent.py was not found."
+fi
 
-[[ -f "mcp_server.py" ]] || \
+if [ ! -f "mcp_server.py" ]; then
     fail "mcp_server.py was not found."
+fi
 
 # -----------------------------------------------------------------------------
 # Install uv if required
@@ -187,12 +191,18 @@ else
 
     log "Installing uv..."
 
+    if ! command_exists curl; then
+        fail "curl is required to install uv."
+    fi
+
     curl -LsSf https://astral.sh/uv/install.sh | sh
 
-    export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+    # uv normally installs here.
+    export PATH="${HOME}/.local/bin:${HOME}/.cargo/bin:${PATH}"
 
-    command_exists uv || \
+    if ! command_exists uv; then
         fail "Failed to install uv."
+    fi
 
 fi
 
@@ -203,7 +213,7 @@ fi
 VENV_DIR="${PROJECT_DIR}/.venv"
 PYTHON_BIN="${VENV_DIR}/bin/python"
 
-if [[ -d "$VENV_DIR" ]]; then
+if [ -d "$VENV_DIR" ]; then
 
     log "Using existing virtual environment."
 
@@ -216,8 +226,9 @@ else
         --python "$PYTHON"
 fi
 
-[[ -x "$PYTHON_BIN" ]] || \
+if [ ! -x "$PYTHON_BIN" ]; then
     fail "Virtual environment Python was not created."
+fi
 
 # -----------------------------------------------------------------------------
 # Install base dependencies
@@ -230,7 +241,7 @@ uv pip install \
     -r pyproject.toml
 
 # -----------------------------------------------------------------------------
-# Start wizard
+# Start setup wizard
 # -----------------------------------------------------------------------------
 
 log "Starting AgentDNA setup wizard..."
