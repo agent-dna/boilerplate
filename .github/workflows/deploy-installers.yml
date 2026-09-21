@@ -1,0 +1,61 @@
+name: Deploy AgentDNA Installers
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy installers to VM
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout tagged release
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Install sshpass
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sshpass
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          ssh-keyscan -H "${{ secrets.VM_HOST }}" >> ~/.ssh/known_hosts
+
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Deploy installers
+        env:
+          SSHPASS: ${{ secrets.VM_PASSWORD }}
+          VM_HOST: ${{ secrets.VM_HOST }}
+          VM_USER: ${{ secrets.VM_USER }}
+          VM_DEPLOY_PATH: ${{ secrets.VM_DEPLOY_PATH }}
+        run: |
+          echo "Deploying installers for tag: ${GITHUB_REF_NAME}"
+
+          sshpass -e scp \
+            -o StrictHostKeyChecking=yes \
+            try.sh \
+            try.ps1 \
+            "${VM_USER}@${VM_HOST}:/tmp/"
+
+          sshpass -e ssh \
+            -o StrictHostKeyChecking=yes \
+            "${VM_USER}@${VM_HOST}" \
+            "sudo mkdir -p '${VM_DEPLOY_PATH}' && \
+             sudo install -m 0644 /tmp/try.sh '${VM_DEPLOY_PATH}/try.sh' && \
+             sudo install -m 0644 /tmp/try.ps1 '${VM_DEPLOY_PATH}/try.ps1' && \
+             rm -f /tmp/try.sh /tmp/try.ps1"
+
+      - name: Deployment complete
+        run: |
+          echo "Successfully deployed installers for ${GITHUB_REF_NAME}"

@@ -1,0 +1,34 @@
+[project]
+name = "agentdna-boilerplate"
+version = "0.0.1"
+requires-python = ">=3.10"
+
+dependencies = [
+    "langgraph",
+    "langchain-core",
+    "langchain-mcp-adapters",
+    "fastmcp",
+    "httpx",
+    "python-dotenv",
+    "questionary",
+    "rich",
+]
+
+[project.optional-dependencies]
+ollama = [
+    "langchain-ollama",
+]
+
+gemini = [
+    "langchain-google-genai",
+]
+
+openai = [
+    "langchain-openai",
+]
+
+all = [
+    "langchain-ollama",
+    "langchain-google-genai",
+    "langchain-openai",
+]
