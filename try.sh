@@ -3,7 +3,7 @@
 set -eu
 
 REPO_URL="https://github.com/agent-dna/boilerplate.git"
-INSTALL_DIR="${HOME}/.agentdna"
+PROJECT_NAME="boilerplate"
 PYTHON="${TRY_AGENTDNA_PYTHON:-python3}"
 
 log() {
@@ -20,21 +20,42 @@ command_exists() {
 }
 
 # -----------------------------------------------------------------------------
-# Detect local AgentDNA project
+# Determine the current working directory.
 #
-# Only wizard/__main__.py is used as the local-project marker.
-# If it exists in the current working directory, Git is not used at all.
+# The installer always works from wherever the developer invoked it.
 # -----------------------------------------------------------------------------
 
-if [ -f "./wizard/__main__.py" ]; then
+CURRENT_DIR="$(pwd)"
+
+# -----------------------------------------------------------------------------
+# Detect an existing local AgentDNA project.
+#
+# Only wizard/__main__.py is used as the local-project marker.
+#
+# Local mode:
+#   Use the current directory.
+#
+# Remote mode:
+#   Clone the latest stable release into:
+#
+#       <current-directory>/boilerplate
+# -----------------------------------------------------------------------------
+
+if [ -f "${CURRENT_DIR}/wizard/__main__.py" ]; then
+
     LOCAL_PROJECT="true"
-    PROJECT_DIR="$(pwd)"
+    PROJECT_DIR="${CURRENT_DIR}"
 
     log "Existing AgentDNA project detected."
     log "Using local project: ${PROJECT_DIR}"
+
 else
+
     LOCAL_PROJECT="false"
-    PROJECT_DIR=""
+    PROJECT_DIR="${CURRENT_DIR}/${PROJECT_NAME}"
+
+    log "No local AgentDNA project detected."
+
 fi
 
 # -----------------------------------------------------------------------------
@@ -42,7 +63,7 @@ fi
 # -----------------------------------------------------------------------------
 
 if ! command_exists "$PYTHON"; then
-    fail "Python 3.10 or newer is required, but '$PYTHON' was not found."
+    fail "Python 3.10 or newer is required, but '${PYTHON}' was not found."
 fi
 
 PYTHON_VERSION="$("$PYTHON" --version 2>&1)"
@@ -64,7 +85,7 @@ fi
 # -----------------------------------------------------------------------------
 # Local project
 #
-# No Git operations are performed in local mode.
+# No GitHub access, no tag lookup, and no clone.
 # -----------------------------------------------------------------------------
 
 if [ "$LOCAL_PROJECT" = "true" ]; then
@@ -78,12 +99,12 @@ else
     #
     # Find the latest stable Git tag.
     #
-    # Accepted:
+    # Stable:
     #   v0.1.0
     #   0.1.0
     #   v1.2.3
     #
-    # Rejected:
+    # Not stable:
     #   v0.1.0-alpha
     #   v0.1.0-beta
     #   v0.1.0-rc1
@@ -118,39 +139,31 @@ else
     log "Latest stable release: ${VERSION}"
 
     # -------------------------------------------------------------------------
-    # Prepare installation directory
+    # Do not overwrite an existing directory.
     # -------------------------------------------------------------------------
 
-    if [ -e "$INSTALL_DIR" ]; then
-
-        if [ -n "$(find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
-            log "Removing existing AgentDNA installation..."
-            rm -rf "$INSTALL_DIR"
-        fi
-
+    if [ -e "$PROJECT_DIR" ]; then
+        fail "Installation directory already exists: ${PROJECT_DIR}"
     fi
 
-    mkdir -p "$(dirname "$INSTALL_DIR")"
-
     # -------------------------------------------------------------------------
-    # Clone selected stable release
+    # Clone into the current working directory.
     # -------------------------------------------------------------------------
 
-    log "Downloading AgentDNA..."
+    log "Downloading AgentDNA into:"
+    log "${PROJECT_DIR}"
 
     git clone \
         --depth 1 \
         --branch "$VERSION" \
         --single-branch \
         "$REPO_URL" \
-        "$INSTALL_DIR"
-
-    PROJECT_DIR="$INSTALL_DIR"
+        "$PROJECT_DIR"
 
     cd "$PROJECT_DIR"
 
     # -------------------------------------------------------------------------
-    # Validate cloned project
+    # Validate cloned project.
     # -------------------------------------------------------------------------
 
     if [ ! -f "wizard/__main__.py" ]; then
@@ -197,7 +210,7 @@ else
 
     curl -LsSf https://astral.sh/uv/install.sh | sh
 
-    # uv normally installs here.
+    # uv normally installs into one of these locations.
     export PATH="${HOME}/.local/bin:${HOME}/.cargo/bin:${PATH}"
 
     if ! command_exists uv; then
@@ -245,5 +258,7 @@ uv pip install \
 # -----------------------------------------------------------------------------
 
 log "Starting AgentDNA setup wizard..."
+
+cd "$PROJECT_DIR"
 
 exec "$PYTHON_BIN" -m wizard

@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $RepoUrl = "https://github.com/agent-dna/boilerplate.git"
-$InstallDir = Join-Path $HOME ".agentdna"
+$ProjectName = "boilerplate"
 
 $Python = if ($env:TRY_AGENTDNA_PYTHON) {
     $env:TRY_AGENTDNA_PYTHON
@@ -39,17 +39,33 @@ function Test-CommandExists {
 }
 
 # -----------------------------------------------------------------------------
-# Determine whether we are running from an existing AgentDNA project.
+# Determine current working directory.
 #
-# This intentionally checks ONLY wizard/__main__.py.
+# The installer always works relative to wherever the developer invoked it.
 # -----------------------------------------------------------------------------
 
-$LocalWizard = Join-Path (Get-Location) "wizard\__main__.py"
+$CurrentDir = (Get-Location).Path
 
-if (Test-Path -LiteralPath $LocalWizard) {
+# -----------------------------------------------------------------------------
+# Detect an existing local AgentDNA project.
+#
+# Only wizard/__main__.py is used as the local-project marker.
+#
+# Local mode:
+#   Use the current directory.
+#
+# Remote mode:
+#   Clone into:
+#
+#       <current-directory>\boilerplate
+# -----------------------------------------------------------------------------
+
+$LocalWizard = Join-Path $CurrentDir "wizard\__main__.py"
+
+if (Test-Path -LiteralPath $LocalWizard -PathType Leaf) {
 
     $LocalProject = $true
-    $ProjectDir = (Get-Location).Path
+    $ProjectDir = $CurrentDir
 
     Write-AgentDNA "Existing AgentDNA project detected."
     Write-AgentDNA "Using local project: $ProjectDir"
@@ -58,7 +74,9 @@ if (Test-Path -LiteralPath $LocalWizard) {
 else {
 
     $LocalProject = $false
-    $ProjectDir = $null
+    $ProjectDir = Join-Path $CurrentDir $ProjectName
+
+    Write-AgentDNA "No local AgentDNA project detected."
 
 }
 
@@ -70,8 +88,8 @@ if (-not (Test-CommandExists $Python)) {
     Fail-AgentDNA "Python 3.10 or newer is required, but '$Python' was not found."
 }
 
-$PythonMajor = & $Python -c "import sys; print(sys.version_info.major)"
-$PythonMinor = & $Python -c "import sys; print(sys.version_info.minor)"
+$PythonMajor = & $Python -c "import sys; print(sys.version_info[0])"
+$PythonMinor = & $Python -c "import sys; print(sys.version_info[1])"
 
 if (
     [int]$PythonMajor -lt 3 -or
@@ -90,7 +108,7 @@ Write-AgentDNA "Using $PythonVersion"
 # -----------------------------------------------------------------------------
 # Local project
 #
-# No Git operations whatsoever.
+# No GitHub access, no tag lookup, and no clone.
 # -----------------------------------------------------------------------------
 
 if ($LocalProject) {
@@ -103,14 +121,14 @@ else {
     # -------------------------------------------------------------------------
     # Remote installation
     #
-    # Only stable semantic versions are accepted.
+    # Query Git tags and select the newest stable semantic version.
     #
-    # Accepted:
+    # Stable:
     #   v0.1.0
     #   0.1.0
     #   v1.2.3
     #
-    # Rejected:
+    # Ignored:
     #   v0.1.0-alpha
     #   v0.1.0-beta
     #   v0.1.0-rc1
@@ -151,53 +169,28 @@ else {
     Write-AgentDNA "Latest stable release: $Version"
 
     # -------------------------------------------------------------------------
-    # Prepare installation directory.
+    # Clone into the current working directory.
+    #
+    # Do not overwrite an existing directory.
     # -------------------------------------------------------------------------
 
-    if (Test-Path -LiteralPath $InstallDir) {
-
-        $ExistingItems = Get-ChildItem `
-            -LiteralPath $InstallDir `
-            -Force `
-            -ErrorAction SilentlyContinue
-
-        if ($ExistingItems) {
-            Write-AgentDNA "Removing existing AgentDNA installation..."
-
-            Remove-Item `
-                -LiteralPath $InstallDir `
-                -Recurse `
-                -Force
-        }
+    if (Test-Path -LiteralPath $ProjectDir) {
+        Fail-AgentDNA "Installation directory already exists: $ProjectDir"
     }
 
-    $ParentDir = Split-Path -Parent $InstallDir
-
-    if ($ParentDir) {
-        New-Item `
-            -ItemType Directory `
-            -Path $ParentDir `
-            -Force | Out-Null
-    }
-
-    # -------------------------------------------------------------------------
-    # Clone stable release.
-    # -------------------------------------------------------------------------
-
-    Write-AgentDNA "Downloading AgentDNA..."
+    Write-AgentDNA "Downloading AgentDNA into:"
+    Write-AgentDNA $ProjectDir
 
     & git clone `
         --depth 1 `
         --branch $Version `
         --single-branch `
         $RepoUrl `
-        $InstallDir
+        $ProjectDir
 
     if ($LASTEXITCODE -ne 0) {
         Fail-AgentDNA "Failed to clone AgentDNA."
     }
-
-    $ProjectDir = $InstallDir
 
     Set-Location $ProjectDir
 
@@ -205,7 +198,7 @@ else {
     # Validate cloned project.
     # -------------------------------------------------------------------------
 
-    if (-not (Test-Path "wizard\__main__.py")) {
+    if (-not (Test-Path "wizard\__main__.py" -PathType Leaf)) {
         Fail-AgentDNA "Invalid AgentDNA release: wizard/__main__.py not found."
     }
 }
@@ -214,19 +207,19 @@ else {
 # Validate project
 # -----------------------------------------------------------------------------
 
-if (-not (Test-Path "pyproject.toml")) {
+if (-not (Test-Path "pyproject.toml" -PathType Leaf)) {
     Fail-AgentDNA "pyproject.toml was not found."
 }
 
-if (-not (Test-Path "wizard\__main__.py")) {
+if (-not (Test-Path "wizard\__main__.py" -PathType Leaf)) {
     Fail-AgentDNA "wizard/__main__.py was not found."
 }
 
-if (-not (Test-Path "agent.py")) {
+if (-not (Test-Path "agent.py" -PathType Leaf)) {
     Fail-AgentDNA "agent.py was not found."
 }
 
-if (-not (Test-Path "mcp_server.py")) {
+if (-not (Test-Path "mcp_server.py" -PathType Leaf)) {
     Fail-AgentDNA "mcp_server.py was not found."
 }
 
@@ -247,6 +240,7 @@ else {
         -Uri "https://astral.sh/uv/install.ps1" |
         Invoke-Expression
 
+    # uv may have been installed into one of these locations.
     $env:Path = "$HOME\.local\bin;$HOME\.cargo\bin;$env:Path"
 
     if (-not (Test-CommandExists "uv")) {
@@ -261,7 +255,7 @@ else {
 $VenvDir = Join-Path $ProjectDir ".venv"
 $PythonBin = Join-Path $VenvDir "Scripts\python.exe"
 
-if (Test-Path $VenvDir) {
+if (Test-Path -LiteralPath $VenvDir -PathType Container) {
 
     Write-AgentDNA "Using existing virtual environment."
 
@@ -279,7 +273,7 @@ else {
     }
 }
 
-if (-not (Test-Path $PythonBin)) {
+if (-not (Test-Path -LiteralPath $PythonBin -PathType Leaf)) {
     Fail-AgentDNA "Virtual environment Python was not created."
 }
 
@@ -298,11 +292,15 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # -----------------------------------------------------------------------------
-# Start wizard
+# Start setup wizard
 # -----------------------------------------------------------------------------
 
 Write-AgentDNA "Starting AgentDNA setup wizard..."
 
+Set-Location $ProjectDir
+
 & $PythonBin -m wizard
 
-exit $LASTEXITCODE
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
