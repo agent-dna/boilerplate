@@ -261,4 +261,8 @@ log "Starting AgentDNA setup wizard..."
 
 cd "$PROJECT_DIR"
 
-exec "$PYTHON_BIN" -m wizard
+if [ -r /dev/tty ]; then
+    exec "$PYTHON_BIN" -m wizard < /dev/tty
+else
+    fail "No interactive terminal detected."
+fi
