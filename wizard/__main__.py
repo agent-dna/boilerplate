@@ -17,6 +17,7 @@ from pathlib import Path
 
 import httpx
 import questionary
+from questionary import Style
 from dotenv import dotenv_values, set_key
 from rich.console import Console
 from rich.panel import Panel
@@ -26,14 +27,14 @@ ROOT = Path(__file__).resolve().parent.parent
 
 PROVIDERS = {
     "ollama": {
-        "label": "Ollama - runs locally, free",
+        "label": "Ollama - local, free",
         "package": "langchain-ollama",
         "module": "langchain_ollama",
         "default_model": "llama3.1",
         "key_env": None,
     },
     "gemini": {
-        "label": "Google Gemini - API key (free tier available)",
+        "label": "Google Gemini - API key",
         "package": "langchain-google-genai",
         "module": "langchain_google_genai",
         "default_model": "gemini-2.5-flash",
@@ -46,9 +47,29 @@ PROVIDERS = {
         "default_model": "gpt-4o-mini",
         "key_env": "OPENAI_API_KEY",
     },
+    "openai_compatible": {
+        "label": "OpenAI-compatible endpoint - custom URL",
+        "package": "langchain-openai",
+        "module": "langchain_openai",
+        "default_model": "",
+        "key_env": "OPENAI_COMPATIBLE_API_KEY",
+        "base_url_env": "OPENAI_COMPATIBLE_BASE_URL",
+    },
 }
+# Every label above must stay on one line at an 80-column width (allow ~4
+# columns for the "> " pointer and padding). A wrapped choice can throw off
+# questionary/prompt_toolkit's incremental redraw, so the highlight can stop
+# tracking the selection even though the pointer still moves correctly.
+assert all(len(p["label"]) <= 74 for p in PROVIDERS.values())
 
 DEMO_PROMPT = "What's the weather in Tokyo right now, and what are Japan's capital and population?"
+
+# questionary highlights whichever choice matches `default=` with a permanent
+# reverse-video box that does not move with the arrow keys - it is not a
+# "currently pointed at" indicator, just a static "this was the default" marker.
+# The '»' pointer is the only reliable indicator of the current selection, so
+# the box is turned off here rather than shipped in a way that looks broken.
+NO_HIGHLIGHT_BOX_STYLE = Style([("selected", "noreverse noblink nobold nounderline")])
 
 
 def main():
@@ -57,12 +78,15 @@ def main():
                         help="non-interactive: use flags, environment, .env values and defaults")
     parser.add_argument("--provider", choices=list(PROVIDERS), help="LLM provider")
     parser.add_argument("--model", help="model name")
+    parser.add_argument("--base-url", help="base URL (for the openai_compatible provider)")
     parser.add_argument("--prompt", help="question for the demo run")
     parser.add_argument("--no-run", action="store_true", help="save configuration only; skip the demo run")
     args = parser.parse_args()
 
     console = Console()
     interactive = not args.yes
+    try_mode = os.getenv("AGENTDNA_TRY_MODE") == "1"
+
     if interactive and not (sys.stdin.isatty() and sys.stdout.isatty()):
         console.print("[red]No interactive terminal detected.[/red] Re-run with --yes (see --help).")
         sys.exit(1)
@@ -78,6 +102,7 @@ def main():
     provider = args.provider
     while True:
         key_typed = False
+        base_url_typed = False
 
         if provider is None:
             fallback = os.getenv("LLM_PROVIDER") or existing.get("LLM_PROVIDER") or "ollama"
@@ -86,6 +111,7 @@ def main():
                     "Which LLM provider?",
                     choices=[questionary.Choice(v["label"], value=k) for k, v in PROVIDERS.items()],
                     default=fallback if fallback in PROVIDERS else "ollama",
+                    style=NO_HIGHLIGHT_BOX_STYLE,
                 ).unsafe_ask()
             else:
                 provider = fallback
@@ -93,6 +119,7 @@ def main():
             console.print(f"[red]Unknown provider '{provider}'.[/red] Choose one of: {', '.join(PROVIDERS)}")
             sys.exit(1)
         cfg = PROVIDERS[provider]
+        base_url_env = cfg.get("base_url_env")
 
         # A model saved for a different provider would not be a sensible default.
         default_model = (
@@ -116,6 +143,7 @@ def main():
                 action = questionary.select(
                     "What would you like to do?",
                     choices=["Retry", "Choose a different provider", "Quit"],
+                    style=NO_HIGHLIGHT_BOX_STYLE,
                 ).unsafe_ask()
                 if action == "Quit":
                     sys.exit(1)
@@ -133,6 +161,7 @@ def main():
                     "Which model?",
                     choices=installed + [download_label, custom_label],
                     default=installed_match,
+                    style=NO_HIGHLIGHT_BOX_STYLE,
                 ).unsafe_ask()
                 if pick == download_label:
                     model = cfg["default_model"]
@@ -170,6 +199,24 @@ def main():
                     console.print(f"[red]Could not download '{model}':[/red] {error}")
                     sys.exit(1)
         else:
+            # ---- base URL, only for providers that declare one (openai_compatible) ----
+            base_url = None
+            if base_url_env:
+                base_url = args.base_url or os.getenv(base_url_env) or existing.get(base_url_env)
+                if args.base_url:
+                    base_url_typed = True
+                elif base_url:
+                    console.print(f"Using {base_url_env} from your environment or .env")
+                elif interactive:
+                    base_url = questionary.text(
+                        "Base URL (e.g. https://openrouter.ai/api/v1):"
+                    ).unsafe_ask().strip()
+                    base_url_typed = True
+                if not base_url:
+                    console.print(f"[red]{base_url_env} is not set.[/red] Export it or add it to .env, then re-run.")
+                    sys.exit(1)
+
+            # ---- API key ----
             key_env = cfg["key_env"]
             api_key = os.getenv(key_env) or existing.get(key_env)
             if api_key:
@@ -180,10 +227,15 @@ def main():
             if not api_key:
                 console.print(f"[red]{key_env} is not set.[/red] Export it or add it to .env, then re-run.")
                 sys.exit(1)
+
+            # ---- model ----
             model = args.model
             if model is None and interactive:
-                model = questionary.text("Model name:", default=default_model).unsafe_ask().strip()
+                model = questionary.text("Model name:", default=default_model or "").unsafe_ask().strip()
             model = model or default_model
+            if not model:
+                console.print("[red]A model name is required for this provider.[/red]")
+                sys.exit(1)
 
         break
 
@@ -195,6 +247,8 @@ def main():
         set_key(str(env_file), "OLLAMA_BASE_URL", base_url, quote_mode="never")
     if key_typed:
         set_key(str(env_file), key_env, api_key, quote_mode="never")
+    if base_url_typed:
+        set_key(str(env_file), base_url_env, base_url, quote_mode="never")
     console.print(f"[green]✓[/green] Saved settings to {env_file}")
 
     # ---- 3. install only the selected provider's package -------------------
@@ -239,6 +293,8 @@ def main():
         run_env["OLLAMA_BASE_URL"] = base_url
     else:
         run_env[key_env] = api_key
+        if base_url_env:
+            run_env[base_url_env] = base_url
 
     server_log = tempfile.TemporaryFile("w+")
     server = subprocess.Popen(
@@ -272,7 +328,7 @@ def main():
                 "[red]The agent run failed.[/red] Check the provider, model and API key "
                 f"in {env_file}, then re-run [cyan]python -m wizard[/cyan]."
             )
-        elif interactive and questionary.confirm("Keep chatting with the agent?", default=False).unsafe_ask():
+        elif interactive and not try_mode and questionary.confirm("Keep chatting with the agent?", default=False).unsafe_ask():
             exit_code = subprocess.run([sys.executable, "agent.py"], cwd=ROOT, env=run_env).returncode
     finally:
         server.terminate()

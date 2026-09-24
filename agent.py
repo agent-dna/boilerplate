@@ -25,7 +25,7 @@ SYSTEM_PROMPT = (
 
 
 async def main():
-    # --- LLM provider (switch via LLM_PROVIDER env var: ollama | gemini | openai) ---
+    # --- LLM provider (switch via LLM_PROVIDER env var: ollama | gemini | openai | openai_compatible) ---
     provider = os.getenv("LLM_PROVIDER", "ollama").lower()
     model = os.getenv("LLM_MODEL")
 
@@ -37,6 +37,20 @@ async def main():
         from langchain_openai import ChatOpenAI
 
         llm = ChatOpenAI(model=model or "gpt-4o-mini", temperature=0)
+    elif provider == "openai_compatible":
+        from langchain_openai import ChatOpenAI
+
+        base_url = os.getenv("OPENAI_COMPATIBLE_BASE_URL")
+        if not base_url:
+            raise ValueError("OPENAI_COMPATIBLE_BASE_URL is required for provider 'openai_compatible'")
+        if not model:
+            raise ValueError("LLM_MODEL is required for provider 'openai_compatible'")
+        llm = ChatOpenAI(
+            model=model,
+            base_url=base_url,
+            api_key=os.getenv("OPENAI_COMPATIBLE_API_KEY"),
+            temperature=0,
+        )
     elif provider == "ollama":
         from langchain_ollama import ChatOllama
 

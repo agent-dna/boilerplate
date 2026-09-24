@@ -261,6 +261,8 @@ log "Starting AgentDNA setup wizard..."
 
 cd "$PROJECT_DIR"
 
+export AGENTDNA_TRY_MODE="1"
+
 if [ -r /dev/tty ]; then
     exec "$PYTHON_BIN" -m wizard < /dev/tty
 else
