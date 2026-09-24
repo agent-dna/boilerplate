@@ -62,7 +62,48 @@ PROVIDERS = {
 # tracking the selection even though the pointer still moves correctly.
 assert all(len(p["label"]) <= 74 for p in PROVIDERS.values())
 
-DEMO_PROMPT = "What's the weather in Tokyo right now, and what are Japan's capital and population?"
+DEMO_PROMPT = "What's the weather in Tokyo, and what are Japan's capital and population?"
+
+# Offered as choices for the first question. Like the provider labels, each
+# must fit on one line at an 80-column width.
+SAMPLE_PROMPTS = [
+    DEMO_PROMPT,
+    "What's the weather in Pune right now?",
+    # wikipedia_summary needs an exact article title, and asking for the
+    # dictionary by name makes a tool call clearly expected.
+    "Look up Alan Turing on Wikipedia.",
+    'What does the dictionary say "serendipity" means?',
+]
+assert all(len(p) <= 74 for p in SAMPLE_PROMPTS)
+
+# Shown when the wizard starts, so users know what they are setting up.
+# Keep lines short enough for an 80-column terminal.
+AGENT_OVERVIEW = """\
+[bold]What you're setting up[/bold]
+A research assistant: one LangGraph agent, driven by an LLM you choose,
+that answers questions by calling tools on a local MCP server.
+
+[bold]How it works[/bold]
+  you ──► agent (LangGraph + LLM) ⇄ MCP server (FastMCP) ──► public APIs
+The agent decides whether it needs a tool, calls it, reads the result,
+and repeats until it can answer. One question can use several tools.
+
+[bold]Tools[/bold] (read-only lookups over free public APIs, no keys needed)
+  [cyan]get_weather(city)[/cyan]
+    Finds the city, then returns its current temperature, humidity,
+    wind speed and WMO weather code.                   [dim]Open-Meteo[/dim]
+  [cyan]wikipedia_summary(topic)[/cyan]
+    Takes an exact article title (no search) and returns its title,
+    description, opening summary and link.              [dim]Wikipedia[/dim]
+  [cyan]country_info(name)[/cyan]
+    Returns a country's name, capital, region, subregion, population,
+    languages and currencies.                      [dim]REST Countries[/dim]
+  [cyan]define_word(word)[/cyan]
+    Returns up to two English definitions for each of up to three
+    parts of speech (noun, verb, ...).            [dim]Free Dictionary[/dim]
+
+[bold]Next[/bold]
+Pick your LLM provider and model, then ask the agent a first question."""
 
 # questionary highlights whichever choice matches `default=` with a permanent
 # reverse-video box that does not move with the arrow keys - it is not a
@@ -94,7 +135,8 @@ def main():
     env_file = ROOT / ".env"
     existing = dotenv_values(env_file) if env_file.exists() else {}
     console.print(Panel.fit(
-        "[bold]Single-agent LangGraph + MCP[/bold]\nConfigure your LLM, then run a first query.",
+        AGENT_OVERVIEW,
+        title="[bold]Single-agent LangGraph + MCP[/bold]",
         border_style="cyan",
     ))
 
@@ -273,7 +315,14 @@ def main():
     # ---- 4. start the MCP server, run the agent -----------------------------
     prompt = args.prompt
     if prompt is None and interactive:
-        prompt = questionary.text("Try a first question:", default=DEMO_PROMPT).unsafe_ask().strip()
+        own_question = "Ask my own question"
+        prompt = questionary.select(
+            "Try a first question:",
+            choices=SAMPLE_PROMPTS + [own_question],
+            style=NO_HIGHLIGHT_BOX_STYLE,
+        ).unsafe_ask()
+        if prompt == own_question:
+            prompt = questionary.text("Your question:").unsafe_ask().strip()
     prompt = prompt or DEMO_PROMPT
 
     # A free port per run, so the demo never clashes with something already listening.

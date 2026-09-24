@@ -59,7 +59,7 @@ Or start the pieces yourself, as in [Run](#run) below.
 | Tool | Purpose | Backing API |
 |------|---------|-------------|
 | `get_weather(city)` | Current weather for a city | [Open-Meteo](https://open-meteo.com) |
-| `wikipedia_summary(topic)` | Short summary of a Wikipedia article | [Wikipedia REST API](https://en.wikipedia.org/api/rest_v1/) |
+| `wikipedia_summary(topic)` | Short summary of a Wikipedia article (exact title, no search) | [Wikipedia REST API](https://en.wikipedia.org/api/rest_v1/) |
 | `country_info(name)` | Capital, region, population, languages, currencies | [REST Countries](https://restcountries.com) |
 | `define_word(word)` | English word definitions | [Free Dictionary API](https://dictionaryapi.dev) |
 
@@ -130,9 +130,9 @@ python agent.py
 Example prompts:
 
 - `What's the weather in Pune right now?`
-- `Give me a short summary of the Transformer architecture.`
+- `Look up Alan Turing on Wikipedia.` (`wikipedia_summary` needs an exact article title; it doesn't search)
 - `What's the capital and population of Japan, and what's the weather there?` (chains multiple tools)
-- `Define "ephemeral".`
+- `What does the dictionary say "serendipity" means?`
 
 Type `exit` or `quit` to stop.
 

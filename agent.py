@@ -6,11 +6,14 @@ Run (in a second terminal, after starting mcp_server.py):  python agent.py
 One-shot:  python agent.py "What's the weather in Tokyo?"
 """
 import asyncio
+import json
 import os
+import re
 import sys
+import uuid
 
 from dotenv import load_dotenv
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import AIMessage, SystemMessage
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.graph import START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -22,6 +25,33 @@ SYSTEM_PROMPT = (
     "weather, Wikipedia summaries, country facts and word definitions. "
     "Only use tools when needed, and answer concisely based on tool results."
 )
+
+# Some OpenAI-compatible servers return a tool call as plain text, e.g.
+# '<tools>{"name": "define_word", "arguments": {"word": "x"}}</tools>',
+# instead of in the structured tool_calls field.
+TEXT_TOOL_CALL_TAG = re.compile(r"<(?:tools|tool_call)>\s*")
+
+
+def parse_text_tool_calls(text: str, tool_names: set[str]) -> list[dict]:
+    """Extract tool calls a model wrote as text; returns [] if there are none."""
+    calls = []
+    for tag in TEXT_TOOL_CALL_TAG.finditer(text):
+        try:
+            payload, _ = json.JSONDecoder().raw_decode(text, tag.end())
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict) or payload.get("name") not in tool_names:
+            continue
+        args = payload.get("arguments", {})
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except json.JSONDecodeError:
+                continue
+        if isinstance(args, dict):
+            calls.append({"name": payload["name"], "args": args,
+                          "id": f"call_{uuid.uuid4().hex[:12]}", "type": "tool_call"})
+    return calls
 
 
 async def main():
@@ -74,12 +104,17 @@ async def main():
     tools = await client.get_tools()
     print(f"Loaded MCP tools: {[t.name for t in tools]}")
     llm_with_tools = llm.bind_tools(tools)
+    tool_names = {t.name for t in tools}
 
     # --- The single agent node ---
     async def agent(state: MessagesState):
         response = await llm_with_tools.ainvoke(
             [SystemMessage(content=SYSTEM_PROMPT)] + state["messages"]
         )
+        if not response.tool_calls and isinstance(response.content, str):
+            text_calls = parse_text_tool_calls(response.content, tool_names)
+            if text_calls:
+                response = AIMessage(content="", tool_calls=text_calls, id=response.id)
         return {"messages": [response]}
 
     # --- Graph ---
