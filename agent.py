@@ -100,19 +100,6 @@ async def main():
         print(f"\nagent> {result['messages'][-1].content}")
         return
 
-    # --- Simple chat loop with conversation memory ---
-    history = []
-    print("Ask something (type 'exit' to quit).")
-    while True:
-        question = input("\nyou> ").strip()
-        if question.lower() in {"exit", "quit"}:
-            break
-        result = await graph.ainvoke(
-            {"messages": history + [("user", question)]},
-            {"recursion_limit": 12},
-        )
-        history = result["messages"]
-        print(f"\nagent> {history[-1].content}")
 
 
 if __name__ == "__main__":
