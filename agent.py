@@ -102,7 +102,6 @@ async def main():
         }
     )
     tools = await client.get_tools()
-    print(f"Loaded MCP tools: {[t.name for t in tools]}")
     llm_with_tools = llm.bind_tools(tools)
     tool_names = {t.name for t in tools}
 

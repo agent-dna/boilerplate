@@ -299,21 +299,8 @@ Write-AgentDNA "Starting AgentDNA setup wizard..."
 
 Set-Location $ProjectDir
 
-$PreviousTryMode = $env:AGENTDNA_TRY_MODE
-$env:AGENTDNA_TRY_MODE = "1"
-
-try {
-    & $PythonBin -m wizard
-    $WizardExitCode = $LASTEXITCODE
-}
-finally {
-    if ($null -eq $PreviousTryMode) {
-        Remove-Item Env:AGENTDNA_TRY_MODE -ErrorAction SilentlyContinue
-    }
-    else {
-        $env:AGENTDNA_TRY_MODE = $PreviousTryMode
-    }
-}
+& $PythonBin -m wizard
+$WizardExitCode = $LASTEXITCODE
 
 if ($WizardExitCode -ne 0) {
     exit $WizardExitCode
