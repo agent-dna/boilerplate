@@ -14,9 +14,10 @@ import uuid
 
 from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, SystemMessage
-from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.graph import START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
+
+from mcp_client import load_tools
 
 load_dotenv()
 
@@ -92,16 +93,8 @@ async def main():
     else:
         raise ValueError(f"Unsupported LLM_PROVIDER: {provider}")
 
-    # --- Tools from the MCP server ---
-    client = MultiServerMCPClient(
-        {
-            "free_apis": {
-                "url": os.getenv("MCP_URL", "http://127.0.0.1:8000/mcp"),
-                "transport": "streamable_http",
-            }
-        }
-    )
-    tools = await client.get_tools()
+    # --- Tools from the MCP server (see mcp_client.py) ---
+    tools = await load_tools()
     llm_with_tools = llm.bind_tools(tools)
     tool_names = {t.name for t in tools}
 

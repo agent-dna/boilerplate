@@ -70,6 +70,7 @@ Or start the pieces yourself, as in [Run](#run) below.
 ```
 .
 ├── agent.py           # LangGraph single-agent workflow (chat loop, or one-shot: python agent.py "question")
+├── mcp_client.py      # connects to the MCP server(s) and loads their tools for the agent
 ├── mcp_server.py      # FastMCP server exposing the tools
 ├── wizard/            # interactive setup: provider, model, .env, demo run
 ├── try.sh             # Linux/macOS installer (Quick start)
@@ -139,7 +140,7 @@ Type `exit` or `quit` to stop.
 ## Extending
 
 - **Add a tool:** define another `@mcp.tool()` async function in `mcp_server.py`; the agent picks it up automatically on next start.
-- **Add another MCP server:** add an entry to the `MultiServerMCPClient` config in `agent.py`.
+- **Add another MCP server:** add an entry to the `MultiServerMCPClient` config in `mcp_client.py`.
 - **Change the agent's behavior:** edit `SYSTEM_PROMPT` in `agent.py`.
 
 ## Troubleshooting
