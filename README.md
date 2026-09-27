@@ -156,4 +156,4 @@ Type `exit` or `quit` to stop.
 | Agent never calls tools | Model doesn't support tool calling; use a tool-capable model |
 | `ValueError: Unsupported LLM_PROVIDER` | Check spelling in `.env` |
 | Auth errors (Gemini/OpenAI) | Missing or invalid API key in `.env` |
-| Recursion limit error | Agent looped on tool calls; raise `recursion_limit` in `agent.py` or refine the prompt |
+| Recursion limit error | Agent looped on tool calls; raise `RECURSION_LIMIT` in `agent.py` or refine the prompt |

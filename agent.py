@@ -1,9 +1,11 @@
 """Single-agent LangGraph workflow that uses tools served by mcp_server.py.
 
-Graph:  START -> agent -> (tool calls?) -> tools -> agent -> ... -> END
+Graph:  START -> agent -> END
 
-Run (in a second terminal, after starting mcp_server.py):  python agent.py
-One-shot:  python agent.py "What's the weather in Tokyo?"
+The agent node is built with LangChain's `create_agent`, which runs the model
+and calls tools in a loop until the model answers without requesting a tool.
+
+Run (after starting mcp_server.py):  python agent.py "What's the weather in Tokyo?"
 """
 import asyncio
 import json
@@ -13,9 +15,10 @@ import sys
 import uuid
 
 from dotenv import load_dotenv
-from langchain_core.messages import AIMessage, SystemMessage
-from langgraph.graph import START, MessagesState, StateGraph
-from langgraph.prebuilt import ToolNode, tools_condition
+from langchain.agents import create_agent
+from langchain.agents.middleware import after_model
+from langchain_core.messages import AIMessage
+from langgraph.graph import END, START, MessagesState, StateGraph
 
 from mcp_client import load_tools
 
@@ -26,6 +29,10 @@ SYSTEM_PROMPT = (
     "weather, Wikipedia summaries, country facts and word definitions. "
     "Only use tools when needed, and answer concisely based on tool results."
 )
+
+# Each lookup round takes three graph steps (model, text-tool-call check, tools),
+# so this allows about five rounds per question.
+RECURSION_LIMIT = 18
 
 # Some OpenAI-compatible servers return a tool call as plain text, e.g.
 # '<tools>{"name": "define_word", "arguments": {"word": "x"}}</tools>',
@@ -55,20 +62,20 @@ def parse_text_tool_calls(text: str, tool_names: set[str]) -> list[dict]:
     return calls
 
 
-async def main():
-    # --- LLM provider (switch via LLM_PROVIDER env var: ollama | gemini | openai | openai_compatible) ---
+def create_llm():
+    """Create the chat model selected by LLM_PROVIDER: ollama | gemini | openai | openai_compatible."""
     provider = os.getenv("LLM_PROVIDER", "ollama").lower()
     model = os.getenv("LLM_MODEL")
 
     if provider == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI
 
-        llm = ChatGoogleGenerativeAI(model=model or "gemini-2.5-flash", temperature=0)
-    elif provider == "openai":
+        return ChatGoogleGenerativeAI(model=model or "gemini-2.5-flash", temperature=0)
+    if provider == "openai":
         from langchain_openai import ChatOpenAI
 
-        llm = ChatOpenAI(model=model or "gpt-4o-mini", temperature=0)
-    elif provider == "openai_compatible":
+        return ChatOpenAI(model=model or "gpt-4o-mini", temperature=0)
+    if provider == "openai_compatible":
         from langchain_openai import ChatOpenAI
 
         base_url = os.getenv("OPENAI_COMPATIBLE_BASE_URL")
@@ -76,57 +83,64 @@ async def main():
             raise ValueError("OPENAI_COMPATIBLE_BASE_URL is required for provider 'openai_compatible'")
         if not model:
             raise ValueError("LLM_MODEL is required for provider 'openai_compatible'")
-        llm = ChatOpenAI(
+        return ChatOpenAI(
             model=model,
             base_url=base_url,
             api_key=os.getenv("OPENAI_COMPATIBLE_API_KEY"),
             temperature=0,
         )
-    elif provider == "ollama":
+    if provider == "ollama":
         from langchain_ollama import ChatOllama
 
-        llm = ChatOllama(
+        return ChatOllama(
             model=model or "llama3.1",
             base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
             temperature=0,
         )
-    else:
-        raise ValueError(f"Unsupported LLM_PROVIDER: {provider}")
+    raise ValueError(f"Unsupported LLM_PROVIDER: {provider}")
+
+
+async def main():
+    if len(sys.argv) < 2:
+        sys.exit('Usage: python agent.py "your question"')
 
     # --- Tools from the MCP server (see mcp_client.py) ---
     tools = await load_tools()
-    llm_with_tools = llm.bind_tools(tools)
     tool_names = {t.name for t in tools}
 
-    # --- The single agent node ---
-    async def agent(state: MessagesState):
-        response = await llm_with_tools.ainvoke(
-            [SystemMessage(content=SYSTEM_PROMPT)] + state["messages"]
-        )
-        if not response.tool_calls and isinstance(response.content, str):
-            text_calls = parse_text_tool_calls(response.content, tool_names)
-            if text_calls:
-                response = AIMessage(content="", tool_calls=text_calls, id=response.id)
-        return {"messages": [response]}
+    # Runs after every model call. If the model wrote its tool calls as text,
+    # replace its message (same id) with one carrying real tool calls, so the
+    # agent goes on to run the tools.
+    @after_model
+    def recover_text_tool_calls(state, runtime):
+        message = state["messages"][-1]
+        if not isinstance(message, AIMessage) or message.tool_calls or not isinstance(message.content, str):
+            return None
+        text_calls = parse_text_tool_calls(message.content, tool_names)
+        if not text_calls:
+            return None
+        return {"messages": [AIMessage(content="", tool_calls=text_calls, id=message.id)]}
+
+    # --- The agent node: create_agent runs the model + tools loop inside it ---
+    agent = create_agent(
+        model=create_llm(),
+        tools=tools,
+        system_prompt=SYSTEM_PROMPT,
+        middleware=[recover_text_tool_calls],
+    )
 
     # --- Graph ---
     builder = StateGraph(MessagesState)
     builder.add_node("agent", agent)
-    builder.add_node("tools", ToolNode(tools))
     builder.add_edge(START, "agent")
-    builder.add_conditional_edges("agent", tools_condition)  # -> "tools" or END
-    builder.add_edge("tools", "agent")
+    builder.add_edge("agent", END)
     graph = builder.compile()
 
-    # --- One-shot mode: python agent.py "your question" ---
-    if len(sys.argv) > 1:
-        result = await graph.ainvoke(
-            {"messages": [("user", " ".join(sys.argv[1:]))]},
-            {"recursion_limit": 12},
-        )
-        print(f"\nagent> {result['messages'][-1].content}")
-        return
-
+    result = await graph.ainvoke(
+        {"messages": [{"role": "user", "content": " ".join(sys.argv[1:])}]},
+        {"recursion_limit": RECURSION_LIMIT},
+    )
+    print(f"\nagent> {result['messages'][-1].content}")
 
 
 if __name__ == "__main__":

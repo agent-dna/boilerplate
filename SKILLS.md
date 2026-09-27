@@ -93,7 +93,7 @@ Common properties of all skills:
 
 | File | Role |
 |------|------|
-| `agent.py` | Builds the LangGraph graph (one agent node, one tool node), selects the LLM provider and runs the question. |
+| `agent.py` | Selects the LLM provider and builds a LangGraph graph with a single `agent` node. That node is built with LangChain's `create_agent`, which runs the model/tools loop. |
 | `mcp_client.py` | Connects to the MCP server and loads its tools as LangChain tools. |
 | `mcp_server.py` | FastMCP server (`free-query-apis`) that defines the four tools. Listens on `127.0.0.1:8000/mcp` by default. |
 | `wizard/` | Interactive setup: provider, model, `.env`, and a first demo question. |
@@ -105,9 +105,10 @@ Common properties of all skills:
   definitions. Only use tools when needed, and answer concisely based on tool
   results."
 - **Temperature 0**, so answers are as repeatable as the model allows.
-- **Step limit.** Each run is capped at 12 graph steps (`recursion_limit`). One
-  lookup round uses two steps (agent, then tools), so a question can use about
-  five rounds of lookups before the run stops with a recursion-limit error.
+- **Step limit.** Each run is capped at 18 graph steps (`RECURSION_LIMIT`). One
+  lookup round uses three steps (model, text-tool-call check, tools), so a
+  question can use about five rounds of lookups before the run stops with a
+  recursion-limit error.
 - **One question per run.** Almanac runs as `python agent.py "question"`. It
   keeps no memory between runs.
 
@@ -495,7 +496,7 @@ Replies from providers that return structured calls are not changed.
 
 A question that needs more than about five rounds of lookups, or a model that
 keeps calling tools in a loop, stops with a recursion-limit error. Raise
-`recursion_limit` in `agent.py` or ask a narrower question.
+`RECURSION_LIMIT` in `agent.py` or ask a narrower question.
 
 ---
 
@@ -669,9 +670,9 @@ define_word(word: str) -> dict
 
 | Setting | Value | Where |
 |---------|-------|-------|
-| Graph | `START → agent ⇄ tools → END` | `agent.py` |
+| Graph | `START → agent → END`; the `agent` node is built with `create_agent` (model ⇄ tools loop) and one `after_model` middleware | `agent.py` |
 | Temperature | 0 | `agent.py` |
-| Step limit | 12 (`recursion_limit`) | `agent.py` |
+| Step limit | 18 (`RECURSION_LIMIT`) | `agent.py` |
 | MCP transport | Streamable HTTP | `mcp_client.py` |
 | MCP server name | `free-query-apis` | `mcp_server.py` |
 | HTTP timeout | 10 s per request | `mcp_server.py` |
