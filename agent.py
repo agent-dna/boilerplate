@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain.agents.middleware import after_model
 from langchain_core.messages import AIMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, MessagesState, StateGraph
 
 from mcp_client import load_tools
@@ -39,6 +40,8 @@ RECURSION_LIMIT = 18
 # instead of in the structured tool_calls field.
 TEXT_TOOL_CALL_TAG = re.compile(r"<(?:tools|tool_call)>\s*")
 
+class AgentState(MessagesState):
+    pass
 
 def parse_text_tool_calls(text: str, tool_names: set[str]) -> list[dict]:
     """Extract tool calls a model wrote as text; returns [] if there are none."""
@@ -100,12 +103,8 @@ def create_llm():
     raise ValueError(f"Unsupported LLM_PROVIDER: {provider}")
 
 
-async def main():
-    if len(sys.argv) < 2:
-        sys.exit('Usage: python agent.py "your question"')
-
-    # --- Tools from the MCP server (see mcp_client.py) ---
-    tools = await load_tools()
+def create_agent_node(tools: list):
+    """Build the agent and return the graph node that runs it."""
     tool_names = {t.name for t in tools}
 
     # Runs after every model call. If the model wrote its tool calls as text,
@@ -121,7 +120,7 @@ async def main():
             return None
         return {"messages": [AIMessage(content="", tool_calls=text_calls, id=message.id)]}
 
-    # --- The agent node: create_agent runs the model + tools loop inside it ---
+    # create_agent runs the model + tools loop.
     agent = create_agent(
         model=create_llm(),
         tools=tools,
@@ -129,9 +128,25 @@ async def main():
         middleware=[recover_text_tool_calls],
     )
 
+    async def agent_node(state: AgentState, config: RunnableConfig) -> dict:
+        """Run the agent on the conversation and return the messages it added."""
+        # Passing config on keeps the graph's recursion limit and callbacks.        
+        result = await agent.ainvoke({"messages": state["messages"]}, config)
+        return {"messages": result["messages"][len(state["messages"]):]}
+
+    return agent_node
+
+
+async def main():
+    if len(sys.argv) < 2:
+        sys.exit('Usage: python agent.py "your question"')
+
+    # --- Tools from the MCP server (see mcp_client.py) ---
+    tools = await load_tools()
+
     # --- Graph ---
-    builder = StateGraph(MessagesState)
-    builder.add_node("agent", agent)
+    builder = StateGraph(AgentState)
+    builder.add_node("agent", create_agent_node(tools))
     builder.add_edge(START, "agent")
     builder.add_edge("agent", END)
     graph = builder.compile()
