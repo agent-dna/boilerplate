@@ -12,13 +12,15 @@ from agentdna.mcp.server.fastmcp import AgentDNAMCPMiddleware
 from dotenv import load_dotenv
 from cbac import authorize
 
+from wizard import environments
+
 load_dotenv()
 
 MCP_SERVER = AgentDNA(
     name=os.getenv("AGENTDNA_MCP_SERVER_NAME"),
     type="tool",
-    provenance_layer_url=os.getenv("AGENTDNA_PROVENANCE_URL", "https://chain-connector-2-dev.rubix.net"),
-    admin_server_url=os.getenv("AGENTDNA_ADMIN_SERVER_URL", "https://agentdna-admin-dev.agentdna.io"),
+    provenance_layer_url=environments.provenance_url(),
+    admin_server_url=environments.admin_server_url(),
     api_key=os.getenv("AGENTDNA_API_KEY")
 )
 

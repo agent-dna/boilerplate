@@ -8,6 +8,7 @@ from pathlib import Path
 from dotenv import set_key
 
 from .agentdna import API_KEY_ENV, AgentDNAConfig
+from .environments import ENV_VAR
 from .providers import LLMConfig
 from .ui import console, fail
 
@@ -19,6 +20,7 @@ def save_env(env_file: Path, llm: LLMConfig, agentdna: AgentDNAConfig) -> None:
         values[llm.spec["base_url_env"]] = llm.base_url
     if llm.save_api_key:
         values[llm.spec["key_env"]] = llm.api_key
+    values[ENV_VAR] = agentdna.environment
     values.update(agentdna.names)
     if agentdna.save_api_key:
         values[API_KEY_ENV] = agentdna.api_key

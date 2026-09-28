@@ -10,22 +10,34 @@ else {
     "python"
 }
 
-function Write-AgentDNA {
-    param(
-        [string]$Message
-    )
+# -----------------------------------------------------------------------------
+# Environment
+#
+# The two values below are filled in by .github/workflows/deploy-installers.yml
+# when the installer is published, one copy per environment:
+#
+#   dev        clones the develop branch
+#   test-prod  clones the main branch
+#
+# A copy that was not published (run straight from the repository) sets no
+# environment: the wizard then uses AGENTDNA_ENV from .env, or test-prod, the
+# default. It clones main if it has to clone.
+# AGENTDNA_ENV set in the shell takes precedence over the published value.
+# -----------------------------------------------------------------------------
 
-    Write-Host ""
-    Write-Host "[AgentDNA] $Message"
+$AgentDnaBranch = "__AGENTDNA_BRANCH__"
+$AgentDnaEnv = if ($env:AGENTDNA_ENV) {
+    $env:AGENTDNA_ENV
+}
+else {
+    "__AGENTDNA_ENV__"
 }
 
-function Fail-AgentDNA {
-    param(
-        [string]$Message
-    )
-
-    Write-Error "[AgentDNA] ERROR: $Message"
-    exit 1
+if ($AgentDnaBranch -like "__*__") {
+    $AgentDnaBranch = "main"
+}
+if ($AgentDnaEnv -like "__*__") {
+    $AgentDnaEnv = $null
 }
 
 function Test-CommandExists {
@@ -55,7 +67,7 @@ $CurrentDir = (Get-Location).Path
 #   Use the current directory.
 #
 # Remote mode:
-#   Clone into:
+#   Clone the environment's branch into:
 #
 #       <current-directory>\boilerplate
 # -----------------------------------------------------------------------------
@@ -63,29 +75,20 @@ $CurrentDir = (Get-Location).Path
 $LocalWizard = Join-Path $CurrentDir "wizard\__main__.py"
 
 if (Test-Path -LiteralPath $LocalWizard -PathType Leaf) {
-
     $LocalProject = $true
     $ProjectDir = $CurrentDir
-
-    Write-AgentDNA "Existing AgentDNA project detected."
-    Write-AgentDNA "Using local project: $ProjectDir"
-
 }
 else {
-
     $LocalProject = $false
     $ProjectDir = Join-Path $CurrentDir $ProjectName
-
-    Write-AgentDNA "No local AgentDNA project detected."
-
 }
 
 # -----------------------------------------------------------------------------
-# Check Python
+# Check Python (3.10 or newer)
 # -----------------------------------------------------------------------------
 
 if (-not (Test-CommandExists $Python)) {
-    Fail-AgentDNA "Python 3.10 or newer is required, but '$Python' was not found."
+    exit 1  # Python not found
 }
 
 $PythonMajor = & $Python -c "import sys; print(sys.version_info[0])"
@@ -98,17 +101,13 @@ if (
         [int]$PythonMinor -lt 10
     )
 ) {
-    Fail-AgentDNA "Python 3.10 or newer is required."
+    exit 1  # Python older than 3.10
 }
-
-$PythonVersion = & $Python --version 2>&1
-
-Write-AgentDNA "Using $PythonVersion"
 
 # -----------------------------------------------------------------------------
 # Local project
 #
-# No GitHub access, no tag lookup, and no clone.
+# No GitHub access and no clone.
 # -----------------------------------------------------------------------------
 
 if ($LocalProject) {
@@ -121,85 +120,42 @@ else {
     # -------------------------------------------------------------------------
     # Remote installation
     #
-    # Query Git tags and select the newest stable semantic version.
-    #
-    # Stable:
-    #   v0.1.0
-    #   0.1.0
-    #   v1.2.3
-    #
-    # Ignored:
-    #   v0.1.0-alpha
-    #   v0.1.0-beta
-    #   v0.1.0-rc1
-    #   v0.1.0beta
-    #   v0.1.0alpha
+    # Clone the environment's branch: develop for dev, main for test-prod.
     # -------------------------------------------------------------------------
 
     if (-not (Test-CommandExists "git")) {
-        Fail-AgentDNA "Git is required for installing AgentDNA."
+        exit 1  # git not found
     }
 
-    Write-AgentDNA "Finding latest stable AgentDNA release..."
-
-    $TagOutput = & git ls-remote `
-        --tags `
-        --refs `
-        --sort="-v:refname" `
-        $RepoUrl 2>$null
-
-    if ($LASTEXITCODE -ne 0) {
-        Fail-AgentDNA "Could not query GitHub for AgentDNA releases."
-    }
-
-    $Version = $null
-
-    foreach ($Line in $TagOutput) {
-
-        if ($Line -match "refs/tags/(v?[0-9]+\.[0-9]+\.[0-9]+)$") {
-            $Version = $Matches[1]
-            break
-        }
-    }
-
-    if ([string]::IsNullOrWhiteSpace($Version)) {
-        Fail-AgentDNA "No stable AgentDNA release was found."
-    }
-
-    Write-AgentDNA "Latest stable release: $Version"
-
-    # -------------------------------------------------------------------------
-    # Clone into the current working directory.
-    #
     # Do not overwrite an existing directory.
-    # -------------------------------------------------------------------------
-
     if (Test-Path -LiteralPath $ProjectDir) {
-        Fail-AgentDNA "Installation directory already exists: $ProjectDir"
+        exit 1  # installation directory already exists
     }
 
-    Write-AgentDNA "Downloading AgentDNA into:"
-    Write-AgentDNA $ProjectDir
-
+    # Clone into the current working directory.
     & git clone `
         --depth 1 `
-        --branch $Version `
+        --branch $AgentDnaBranch `
         --single-branch `
         $RepoUrl `
         $ProjectDir
 
     if ($LASTEXITCODE -ne 0) {
-        Fail-AgentDNA "Failed to clone AgentDNA."
+        exit 1  # clone of the environment's branch failed
     }
 
     Set-Location $ProjectDir
 
-    # -------------------------------------------------------------------------
-    # Validate cloned project.
-    # -------------------------------------------------------------------------
+    # The environment's branch must be the one checked out.
+    $CheckedOutBranch = (& git rev-parse --abbrev-ref HEAD | Out-String).Trim()
 
+    if ($CheckedOutBranch -ne $AgentDnaBranch) {
+        exit 1  # wrong branch checked out
+    }
+
+    # Validate cloned project.
     if (-not (Test-Path "wizard\__main__.py" -PathType Leaf)) {
-        Fail-AgentDNA "Invalid AgentDNA release: wizard/__main__.py not found."
+        exit 1  # invalid AgentDNA project: wizard/__main__.py not found
     }
 }
 
@@ -207,34 +163,17 @@ else {
 # Validate project
 # -----------------------------------------------------------------------------
 
-if (-not (Test-Path "pyproject.toml" -PathType Leaf)) {
-    Fail-AgentDNA "pyproject.toml was not found."
-}
-
-if (-not (Test-Path "wizard\__main__.py" -PathType Leaf)) {
-    Fail-AgentDNA "wizard/__main__.py was not found."
-}
-
-if (-not (Test-Path "agent.py" -PathType Leaf)) {
-    Fail-AgentDNA "agent.py was not found."
-}
-
-if (-not (Test-Path "mcp_server.py" -PathType Leaf)) {
-    Fail-AgentDNA "mcp_server.py was not found."
+foreach ($RequiredFile in @("pyproject.toml", "wizard\__main__.py", "agent.py", "mcp_server.py")) {
+    if (-not (Test-Path $RequiredFile -PathType Leaf)) {
+        exit 1  # required project file missing
+    }
 }
 
 # -----------------------------------------------------------------------------
 # Install uv if required
 # -----------------------------------------------------------------------------
 
-if (Test-CommandExists "uv") {
-
-    Write-AgentDNA "uv is already installed."
-
-}
-else {
-
-    Write-AgentDNA "Installing uv..."
+if (-not (Test-CommandExists "uv")) {
 
     Invoke-RestMethod `
         -Uri "https://astral.sh/uv/install.ps1" |
@@ -244,7 +183,7 @@ else {
     $env:Path = "$HOME\.local\bin;$HOME\.cargo\bin;$env:Path"
 
     if (-not (Test-CommandExists "uv")) {
-        Fail-AgentDNA "Failed to install uv."
+        exit 1  # uv installation failed
     }
 }
 
@@ -255,49 +194,45 @@ else {
 $VenvDir = Join-Path $ProjectDir ".venv"
 $PythonBin = Join-Path $VenvDir "Scripts\python.exe"
 
-if (Test-Path -LiteralPath $VenvDir -PathType Container) {
-
-    Write-AgentDNA "Using existing virtual environment."
-
-}
-else {
-
-    Write-AgentDNA "Creating virtual environment..."
+if (-not (Test-Path -LiteralPath $VenvDir -PathType Container)) {
 
     & uv venv `
         $VenvDir `
         --python $Python
 
     if ($LASTEXITCODE -ne 0) {
-        Fail-AgentDNA "Failed to create virtual environment."
+        exit 1  # virtual environment creation failed
     }
 }
 
 if (-not (Test-Path -LiteralPath $PythonBin -PathType Leaf)) {
-    Fail-AgentDNA "Virtual environment Python was not created."
+    exit 1  # virtual environment Python was not created
 }
 
 # -----------------------------------------------------------------------------
 # Install base dependencies
 # -----------------------------------------------------------------------------
 
-Write-AgentDNA "Installing dependencies..."
-
 & uv pip install `
     --python $PythonBin `
     -r pyproject.toml
 
 if ($LASTEXITCODE -ne 0) {
-    Fail-AgentDNA "Failed to install dependencies."
+    exit 1  # dependency installation failed
 }
 
 # -----------------------------------------------------------------------------
 # Start setup wizard
 # -----------------------------------------------------------------------------
 
-Write-AgentDNA "Starting AgentDNA setup wizard..."
-
 Set-Location $ProjectDir
+
+# Pass the environment to the wizard only when there is one (published copy
+# or shell), so a value already saved in .env is not overridden. The wizard
+# saves it to .env, where the agent reads it.
+if ($AgentDnaEnv) {
+    $env:AGENTDNA_ENV = $AgentDnaEnv
+}
 
 & $PythonBin -m wizard
 $WizardExitCode = $LASTEXITCODE

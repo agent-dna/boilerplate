@@ -21,6 +21,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, MessagesState, StateGraph
 
 from mcp_client import load_tools
+from wizard import environments
 from wizard.audit_link import display_dashboard_info
 
 from agentdna.core import AgentDNA
@@ -44,14 +45,14 @@ USER = AgentDNA(
     name=os.getenv("AGENTDNA_USER"),
     type="user",
     api_key=os.getenv("AGENTDNA_API_KEY"),
-    provenance_layer_url=os.getenv("AGENTDNA_PROVENANCE_URL", "https://chain-connector-2-dev.rubix.net")
+    provenance_layer_url=environments.provenance_url()
 )
 
 AGENT = AgentDNA(
     name=os.getenv("AGENTDNA_AGENT"),
     type="agent",
     api_key=os.getenv("AGENTDNA_API_KEY"),
-    provenance_layer_url=os.getenv("AGENTDNA_PROVENANCE_URL", "https://chain-connector-2-dev.rubix.net"),
+    provenance_layer_url=environments.provenance_url(),
     agent_policy_file=SKILLS_FILE
 )
 

@@ -1,23 +1,82 @@
 name: Deploy AgentDNA Installers
 
+# Publishes try.sh and try.ps1, one copy per environment:
+#   dev:       a pull request merged into develop
+#   test-prod: a pull request merged into main
+# Manual runs publish the selected branch: develop to dev, main to test-prod.
+# See DEPLOY.md in this folder for the secrets and the server layout.
 on:
-  push:
-    tags:
-      - "v*"
+  pull_request:
+    types: [closed]
+    branches: [develop, main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   deploy:
-    name: Deploy installers to VM
+    name: Deploy installers
     runs-on: ubuntu-latest
+    # A pull request closed without merging publishes nothing.
+    if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
+    # One publish per branch at a time; a newer one waits instead of
+    # interrupting a running one.
+    concurrency:
+      group: deploy-installers-${{ github.event.pull_request.base.ref || github.ref_name }}
+      cancel-in-progress: false
 
     steps:
-      - name: Checkout tagged release
+      - name: Select environment
+        id: select
+        env:
+          EVENT: ${{ github.event_name }}
+          BRANCH: ${{ github.event.pull_request.base.ref || github.ref_name }}
+          SHA: ${{ github.sha }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          case "$BRANCH" in
+            develop) environment=dev ;;
+            main)    environment=test-prod ;;
+            *)
+              echo "::error::Installers are published from develop (dev) or main (test-prod), not '$BRANCH'"
+              exit 1
+              ;;
+          esac
+          if [ "$EVENT" = "pull_request" ]; then ref="$MERGE_SHA"; else ref="$SHA"; fi
+          {
+            echo "environment=$environment"
+            echo "branch=$BRANCH"
+            echo "ref=$ref"
+          } >> "$GITHUB_OUTPUT"
+          echo "Publishing installers for $environment (branch $BRANCH, commit $ref)"
+
+      - name: Checkout
         uses: actions/checkout@v6
         with:
+          ref: ${{ steps.select.outputs.ref }}
           fetch-depth: 1
+
+      - name: Fill in environment and branch
+        env:
+          ENVIRONMENT: ${{ steps.select.outputs.environment }}
+          BRANCH: ${{ steps.select.outputs.branch }}
+        run: |
+          # The installers in the repository contain the placeholders
+          # __AGENTDNA_ENV__ and __AGENTDNA_BRANCH__; the published copies get
+          # this environment's values.
+          out="$RUNNER_TEMP/installers"
+          mkdir -p "$out"
+          for file in try.sh try.ps1; do
+            sed -e "s/__AGENTDNA_BRANCH__/$BRANCH/g" \
+                -e "s/__AGENTDNA_ENV__/$ENVIRONMENT/g" \
+                "$file" > "$out/$file"
+          done
+          if grep -n "__AGENTDNA_" "$out/try.sh" "$out/try.ps1"; then
+            echo "::error::Placeholders left in the published installers"
+            exit 1
+          fi
+          sh -n "$out/try.sh"
 
       - name: Install sshpass
         run: |
@@ -38,24 +97,45 @@ jobs:
           SSHPASS: ${{ secrets.VM_PASSWORD }}
           VM_HOST: ${{ secrets.VM_HOST }}
           VM_USER: ${{ secrets.VM_USER }}
-          VM_DEPLOY_PATH: ${{ secrets.VM_DEPLOY_PATH }}
+          VM_DEPLOY_PATH_DEV: ${{ secrets.VM_DEPLOY_PATH_DEV }}
+          VM_DEPLOY_PATH_TEST_PROD: ${{ secrets.VM_DEPLOY_PATH_TEST_PROD }}
+          ENVIRONMENT: ${{ steps.select.outputs.environment }}
         run: |
-          echo "Deploying installers for tag: ${GITHUB_REF_NAME}"
+          # Chosen here rather than in an expression, so a missing secret fails
+          # the run instead of falling back to another environment's path.
+          case "$ENVIRONMENT" in
+            dev)       deploy_path="$VM_DEPLOY_PATH_DEV" ;;
+            test-prod) deploy_path="$VM_DEPLOY_PATH_TEST_PROD" ;;
+          esac
+          if [ -z "$deploy_path" ]; then
+            echo "::error::No deploy path secret for $ENVIRONMENT (VM_DEPLOY_PATH_DEV / VM_DEPLOY_PATH_TEST_PROD)"
+            exit 1
+          fi
 
-          sshpass -e scp \
-            -o StrictHostKeyChecking=yes \
-            try.sh \
-            try.ps1 \
-            "${VM_USER}@${VM_HOST}:/tmp/"
+          # A folder per run, so dev and test-prod publishes do not collide.
+          remote_tmp="/tmp/agentdna-installers-${ENVIRONMENT}-${GITHUB_RUN_ID}"
+
+          echo "Deploying $ENVIRONMENT installers to $deploy_path"
 
           sshpass -e ssh \
             -o StrictHostKeyChecking=yes \
             "${VM_USER}@${VM_HOST}" \
-            "sudo mkdir -p '${VM_DEPLOY_PATH}' && \
-             sudo install -m 0644 /tmp/try.sh '${VM_DEPLOY_PATH}/try.sh' && \
-             sudo install -m 0644 /tmp/try.ps1 '${VM_DEPLOY_PATH}/try.ps1' && \
-             rm -f /tmp/try.sh /tmp/try.ps1"
+            "mkdir -p '${remote_tmp}'"
 
-      - name: Deployment complete
+          sshpass -e scp \
+            -o StrictHostKeyChecking=yes \
+            "$RUNNER_TEMP/installers/try.sh" \
+            "$RUNNER_TEMP/installers/try.ps1" \
+            "${VM_USER}@${VM_HOST}:${remote_tmp}/"
+
+          sshpass -e ssh \
+            -o StrictHostKeyChecking=yes \
+            "${VM_USER}@${VM_HOST}" \
+            "sudo mkdir -p '${deploy_path}' && \
+             sudo install -m 0644 '${remote_tmp}/try.sh' '${deploy_path}/try.sh' && \
+             sudo install -m 0644 '${remote_tmp}/try.ps1' '${deploy_path}/try.ps1' && \
+             rm -rf '${remote_tmp}'"
+
+      - name: Summary
         run: |
-          echo "Successfully deployed installers for ${GITHUB_REF_NAME}"
+          echo "Published ${{ steps.select.outputs.environment }} installers (branch ${{ steps.select.outputs.branch }}, commit ${{ steps.select.outputs.ref }})" >> "$GITHUB_STEP_SUMMARY"
