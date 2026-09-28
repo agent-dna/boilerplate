@@ -6,27 +6,6 @@ REPO_URL="https://github.com/agent-dna/boilerplate.git"
 PROJECT_NAME="boilerplate"
 PYTHON="${TRY_AGENTDNA_PYTHON:-python3}"
 
-# -----------------------------------------------------------------------------
-# Environment
-#
-# The two values below are filled in by .github/workflows/deploy-installers.yml
-# when the installer is published, one copy per environment:
-#
-#   dev        clones the develop branch
-#   test-prod  clones the main branch
-#
-# A copy that was not published (run straight from the repository) sets no
-# environment: the wizard then uses AGENTDNA_ENV from .env, or test-prod, the
-# default. It clones main if it has to clone.
-# AGENTDNA_ENV set in the shell takes precedence over the published value.
-# -----------------------------------------------------------------------------
-
-AGENTDNA_BRANCH="__AGENTDNA_BRANCH__"
-AGENTDNA_ENV="${AGENTDNA_ENV:-__AGENTDNA_ENV__}"
-
-case "$AGENTDNA_BRANCH" in __*__) AGENTDNA_BRANCH="main" ;; esac
-case "$AGENTDNA_ENV" in __*__) AGENTDNA_ENV="" ;; esac
-
 command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
@@ -48,7 +27,7 @@ CURRENT_DIR="$(pwd)"
 #   Use the current directory.
 #
 # Remote mode:
-#   Clone the environment's branch into:
+#   Clone the main branch into:
 #
 #       <current-directory>/boilerplate
 # -----------------------------------------------------------------------------
@@ -97,7 +76,7 @@ else
     # -------------------------------------------------------------------------
     # Remote installation
     #
-    # Clone the environment's branch: develop for dev, main for test-prod.
+    # Clone the main branch.
     # -------------------------------------------------------------------------
 
     if ! command_exists git; then
@@ -112,17 +91,12 @@ else
     # Clone into the current working directory (set -e stops on failure).
     git clone \
         --depth 1 \
-        --branch "$AGENTDNA_BRANCH" \
+        --branch main \
         --single-branch \
         "$REPO_URL" \
         "$PROJECT_DIR"
 
     cd "$PROJECT_DIR"
-
-    # The environment's branch must be the one checked out.
-    if [ "$(git rev-parse --abbrev-ref HEAD)" != "$AGENTDNA_BRANCH" ]; then
-        exit 1  # wrong branch checked out
-    fi
 
     # Validate cloned project.
     if [ ! -f "wizard/__main__.py" ]; then
@@ -192,15 +166,6 @@ uv pip install \
 # -----------------------------------------------------------------------------
 
 cd "$PROJECT_DIR"
-
-# Pass the environment to the wizard only when there is one (published copy
-# or shell), so a value already saved in .env is not overridden. The wizard
-# saves it to .env, where the agent reads it.
-if [ -n "$AGENTDNA_ENV" ]; then
-    export AGENTDNA_ENV
-else
-    unset AGENTDNA_ENV
-fi
 
 if [ ! -r /dev/tty ]; then
     exit 1  # no interactive terminal

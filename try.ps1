@@ -10,36 +10,6 @@ else {
     "python"
 }
 
-# -----------------------------------------------------------------------------
-# Environment
-#
-# The two values below are filled in by .github/workflows/deploy-installers.yml
-# when the installer is published, one copy per environment:
-#
-#   dev        clones the develop branch
-#   test-prod  clones the main branch
-#
-# A copy that was not published (run straight from the repository) sets no
-# environment: the wizard then uses AGENTDNA_ENV from .env, or test-prod, the
-# default. It clones main if it has to clone.
-# AGENTDNA_ENV set in the shell takes precedence over the published value.
-# -----------------------------------------------------------------------------
-
-$AgentDnaBranch = "__AGENTDNA_BRANCH__"
-$AgentDnaEnv = if ($env:AGENTDNA_ENV) {
-    $env:AGENTDNA_ENV
-}
-else {
-    "__AGENTDNA_ENV__"
-}
-
-if ($AgentDnaBranch -like "__*__") {
-    $AgentDnaBranch = "main"
-}
-if ($AgentDnaEnv -like "__*__") {
-    $AgentDnaEnv = $null
-}
-
 function Test-CommandExists {
     param(
         [string]$Command
@@ -67,7 +37,7 @@ $CurrentDir = (Get-Location).Path
 #   Use the current directory.
 #
 # Remote mode:
-#   Clone the environment's branch into:
+#   Clone the main branch into:
 #
 #       <current-directory>\boilerplate
 # -----------------------------------------------------------------------------
@@ -120,7 +90,7 @@ else {
     # -------------------------------------------------------------------------
     # Remote installation
     #
-    # Clone the environment's branch: develop for dev, main for test-prod.
+    # Clone the main branch.
     # -------------------------------------------------------------------------
 
     if (-not (Test-CommandExists "git")) {
@@ -135,23 +105,16 @@ else {
     # Clone into the current working directory.
     & git clone `
         --depth 1 `
-        --branch $AgentDnaBranch `
+        --branch main `
         --single-branch `
         $RepoUrl `
         $ProjectDir
 
     if ($LASTEXITCODE -ne 0) {
-        exit 1  # clone of the environment's branch failed
+        exit 1  # clone failed
     }
 
     Set-Location $ProjectDir
-
-    # The environment's branch must be the one checked out.
-    $CheckedOutBranch = (& git rev-parse --abbrev-ref HEAD | Out-String).Trim()
-
-    if ($CheckedOutBranch -ne $AgentDnaBranch) {
-        exit 1  # wrong branch checked out
-    }
 
     # Validate cloned project.
     if (-not (Test-Path "wizard\__main__.py" -PathType Leaf)) {
@@ -226,13 +189,6 @@ if ($LASTEXITCODE -ne 0) {
 # -----------------------------------------------------------------------------
 
 Set-Location $ProjectDir
-
-# Pass the environment to the wizard only when there is one (published copy
-# or shell), so a value already saved in .env is not overridden. The wizard
-# saves it to .env, where the agent reads it.
-if ($AgentDnaEnv) {
-    $env:AGENTDNA_ENV = $AgentDnaEnv
-}
 
 & $PythonBin -m wizard
 $WizardExitCode = $LASTEXITCODE

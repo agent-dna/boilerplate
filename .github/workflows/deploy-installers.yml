@@ -1,8 +1,9 @@
 name: Deploy AgentDNA Installers
 
-# Publishes try.sh and try.ps1, one copy per environment:
+# Publishes try.sh and try.ps1 to each environment's deploy path:
 #   dev:       a pull request merged into develop
 #   test-prod: a pull request merged into main
+# The installers are published as they are in the repository.
 # Manual runs publish the selected branch: develop to dev, main to test-prod.
 # See DEPLOY.md in this folder for the secrets and the server layout.
 on:
@@ -57,26 +58,8 @@ jobs:
           ref: ${{ steps.select.outputs.ref }}
           fetch-depth: 1
 
-      - name: Fill in environment and branch
-        env:
-          ENVIRONMENT: ${{ steps.select.outputs.environment }}
-          BRANCH: ${{ steps.select.outputs.branch }}
-        run: |
-          # The installers in the repository contain the placeholders
-          # __AGENTDNA_ENV__ and __AGENTDNA_BRANCH__; the published copies get
-          # this environment's values.
-          out="$RUNNER_TEMP/installers"
-          mkdir -p "$out"
-          for file in try.sh try.ps1; do
-            sed -e "s/__AGENTDNA_BRANCH__/$BRANCH/g" \
-                -e "s/__AGENTDNA_ENV__/$ENVIRONMENT/g" \
-                "$file" > "$out/$file"
-          done
-          if grep -n "__AGENTDNA_" "$out/try.sh" "$out/try.ps1"; then
-            echo "::error::Placeholders left in the published installers"
-            exit 1
-          fi
-          sh -n "$out/try.sh"
+      - name: Check installers
+        run: sh -n try.sh
 
       - name: Install sshpass
         run: |
@@ -124,8 +107,8 @@ jobs:
 
           sshpass -e scp \
             -o StrictHostKeyChecking=yes \
-            "$RUNNER_TEMP/installers/try.sh" \
-            "$RUNNER_TEMP/installers/try.ps1" \
+            try.sh \
+            try.ps1 \
             "${VM_USER}@${VM_HOST}:${remote_tmp}/"
 
           sshpass -e ssh \

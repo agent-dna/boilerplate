@@ -41,7 +41,7 @@ def configure_agentdna(interactive: bool, existing: dict) -> AgentDNAConfig:
     default. Without prompts, all values must come from the environment or
     .env. `existing` holds the values already saved in .env.
 
-    The environment is not asked for: it comes from the installer (see
+    The environment is not asked for: it comes from the shell or .env (see
     resolve_environment).
     """
     environment = resolve_environment(existing)
@@ -70,8 +70,8 @@ def configure_agentdna(interactive: bool, existing: dict) -> AgentDNAConfig:
 def resolve_environment(existing: dict) -> str:
     """Return the AgentDNA environment and select it for this process.
 
-    AGENTDNA_ENV set by the installer (try.sh / try.ps1) comes first, then the
-    value saved in .env, then the default. It is also set in os.environ, so
+    AGENTDNA_ENV set in the shell comes first, then the value saved in .env,
+    then the default. It is also set in os.environ, so
     URLs resolved later in the wizard (the API-key prompt, the audit link) use
     the same environment.
     """

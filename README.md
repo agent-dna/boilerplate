@@ -4,8 +4,9 @@ A minimal agentic workflow built with **LangGraph**: one agent that calls read-o
 
 ## Quick start
 
-One command downloads the project, sets it up and runs a first query. Each
-AgentDNA environment has its own installer URL (see [Environments](#environments)):
+One command downloads the project, sets it up and runs a first query. It
+targets the test-prod environment unless `AGENTDNA_ENV` says otherwise (see
+[Environments](#environments)):
 
 ```bash
 # Linux / macOS
@@ -17,14 +18,15 @@ irm <INSTALLER_URL>/try.ps1 | iex
 ```
 
 Already have a checkout? Run `sh try.sh` or `.\try.ps1` from inside it instead.
-That copy keeps the environment saved in `.env` (test-prod if none), unless
-`AGENTDNA_ENV` is set in the shell (for example `AGENTDNA_ENV=dev sh try.sh`).
+To target dev, set `AGENTDNA_ENV=dev` in the shell first (for example
+`curl -fsSL <INSTALLER_URL>/try.sh | AGENTDNA_ENV=dev sh`), or in `.env` of an
+existing checkout.
 
 **You need:** Python 3.10+, `git`, and one LLM: a local [Ollama](https://ollama.com), or an API key for Gemini, OpenAI, or any OpenAI-compatible endpoint (e.g. OpenRouter). To use a Python other than `python3`, set `TRY_AGENTDNA_PYTHON` to its path.
 
 **What happens:**
 
-1. Outside a checkout, the installer clones its environment's branch (`develop` for dev, `main` for test-prod) into `./boilerplate` and checks that branch is the one checked out. It stops if that folder already exists.
+1. Outside a checkout, the installer clones the `main` branch into `./boilerplate`. It stops if that folder already exists.
 2. It installs [uv](https://docs.astral.sh/uv/) if missing, creates `.venv` and installs the dependencies.
 3. A setup wizard asks for your LLM provider, model and API key (for Ollama, it offers to download the model), then your AgentDNA API key and the names of your user, agent and MCP server. It saves them to `.env`, together with the environment (`AGENTDNA_ENV`).
 4. It starts the MCP server, sends the agent a demo question, prints the answer and shuts everything down.
@@ -43,21 +45,19 @@ Or start the pieces yourself, as in [Run](#run) below.
 The agent and MCP server talk to one AgentDNA environment, selected by
 `AGENTDNA_ENV`:
 
-| `AGENTDNA_ENV` | Installer clones | Provenance layer | Admin server | Dashboard |
-|----------------|------------------|------------------|--------------|-----------|
-| `test-prod` (default) | `main` | `https://chain-connector-2.rubix.net` | `https://agentdna-admin.agentdna.io` | `https://dashboard.agentdna.io` |
-| `dev` | `develop` | `https://chain-connector-2-dev.rubix.net` | `https://agentdna-admin-dev.agentdna.io` | `https://dashboard-dev.agentdna.io` |
+| `AGENTDNA_ENV` | Provenance layer | Admin server | Dashboard |
+|----------------|------------------|--------------|-----------|
+| `test-prod` (default) | `https://chain-connector-2.rubix.net` | `https://agentdna-admin.agentdna.io` | `https://dashboard.agentdna.io` |
+| `dev` | `https://chain-connector-2-dev.rubix.net` | `https://agentdna-admin-dev.agentdna.io` | `https://dashboard-dev.agentdna.io` |
 
-- **Installer:** each environment has its own published copy of `try.sh` /
-  `try.ps1`, with the environment and branch filled in (see
-  `.github/workflows/DEPLOY.md`). The installer passes the environment to the
-  wizard, which saves it to `.env`.
-- **Override:** set `AGENTDNA_ENV` in the shell before running the installer or
-  the wizard, or edit it in `.env`. `AGENTDNA_PROVENANCE_URL` and
-  `AGENTDNA_ADMIN_SERVER_URL` override a single service URL.
+- **Choosing:** the wizard uses `AGENTDNA_ENV` from the shell, else the value
+  saved in `.env`, else `test-prod`, and saves its choice to `.env`. The
+  installers do not set it; they are the same for every environment and clone
+  the `main` branch.
+- **Override:** `AGENTDNA_PROVENANCE_URL` and `AGENTDNA_ADMIN_SERVER_URL`
+  override a single service URL.
 - **Adding an environment:** add an entry to `ENVIRONMENTS` in
-  `wizard/environments.py`, and a branch mapping in
-  `.github/workflows/deploy-installers.yml`.
+  `wizard/environments.py`.
 
 ## Architecture
 
@@ -179,7 +179,6 @@ Type `exit` or `quit` to stop.
 | Symptom | Likely cause / fix |
 |---------|--------------------|
 | `Installation directory already exists` | A `./boilerplate` folder is already there. `cd` into it and run `sh try.sh`, or run the installer from another folder |
-| `Could not clone the 'develop' branch` (or `'main'`) | The branch does not exist on GitHub or the network is down. For dev, the `develop` branch must exist |
 | `unknown AGENTDNA_ENV '...'` | `AGENTDNA_ENV` in the shell or `.env` is not `test-prod` or `dev` |
 | `Python 3.10 or newer is required` | Install a newer Python, or point `TRY_AGENTDNA_PYTHON` at one |
 | `No interactive terminal detected` | The wizard needs a real terminal. Run the installer from one, not from CI or a non-interactive shell |

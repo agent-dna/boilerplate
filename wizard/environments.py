@@ -1,8 +1,8 @@
 """AgentDNA environments and their service URLs.
 
-The environment is selected by AGENTDNA_ENV (default "test-prod"). The installer
-sets it, and the wizard saves it to .env, where agent.py and mcp_server.py read
-it. AGENTDNA_PROVENANCE_URL and AGENTDNA_ADMIN_SERVER_URL, when set, override
+The environment is selected by AGENTDNA_ENV (default "test-prod"), set in .env
+or the shell. The wizard saves it to .env, where agent.py and mcp_server.py
+read it. AGENTDNA_PROVENANCE_URL and AGENTDNA_ADMIN_SERVER_URL, when set, override
 the environment's value for that service.
 """
 import os
@@ -22,8 +22,8 @@ class Environment:
     dashboard_url: str
 
 
-# To add an environment, add an entry here and to the installer workflow
-# (.github/workflows/deploy-installers.yml).
+# To add an environment, add an entry here. If it gets its own installer
+# location, also add it to .github/workflows/deploy-installers.yml.
 ENVIRONMENTS = {
     "dev": Environment(
         provenance_url="https://chain-connector-2-dev.rubix.net",
