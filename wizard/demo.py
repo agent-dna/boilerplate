@@ -1,4 +1,4 @@
-"""Step 4: pick a first question, start the MCP server and run the agent on it."""
+"""Step 5: pick a first question, start the MCP server and run the agent on it."""
 import os
 import socket
 import subprocess
@@ -11,6 +11,8 @@ from pathlib import Path
 import questionary
 
 from . import ROOT
+from .agentdna import AgentDNAConfig
+from .audit_link import TX_ID_FILE_ENV, show_audit_link
 from .content import DEMO_PROMPT, SAMPLE_PROMPTS
 from .providers import LLMConfig
 from .ui import NO_HIGHLIGHT_BOX_STYLE, console, fail
@@ -33,18 +35,26 @@ def choose_prompt(prompt_arg: str | None, interactive: bool) -> str:
     return prompt or DEMO_PROMPT
 
 
-def run_demo(llm: LLMConfig, prompt: str, env_file: Path) -> int:
+def run_demo(llm: LLMConfig, agentdna: AgentDNAConfig, prompt: str, env_file: Path) -> int:
     """Run the agent once on `prompt` against a fresh MCP server. Returns the agent's exit code."""
     port = find_free_port()
+    # Both processes get the settings chosen in this run, whether or not they
+    # were already in the shell environment or .env.
     env = {
         **os.environ,
         **llm.env(),
+        **agentdna.env(),
         "MCP_PORT": str(port),
         "MCP_URL": f"http://127.0.0.1:{port}/mcp",
     }
 
-    with mcp_server(port, env):
+    with mcp_server(port, env), tempfile.TemporaryDirectory() as handoff_dir:
         console.print(f"[green]✓[/green] MCP server ready on port {port}")
+
+        # agent.py writes the audit transaction ID here instead of showing the
+        # dashboard link, so the link can be shown below the closing rule.
+        tx_id_file = Path(handoff_dir) / "tx_id"
+        env[TX_ID_FILE_ENV] = str(tx_id_file)
 
         console.rule(f"[bold]{prompt}")
         exit_code = run_agent(env, prompt)
@@ -52,9 +62,13 @@ def run_demo(llm: LLMConfig, prompt: str, env_file: Path) -> int:
 
         if exit_code != 0:
             console.print(
-                "[red]The agent run failed.[/red] Check the provider, model and API key "
-                f"in {env_file}, then re-run [cyan]python -m wizard[/cyan]."
+                "[red]The agent run failed.[/red] Check the provider, model, API keys and AgentDNA "
+                f"settings in {env_file}, then re-run [cyan]python -m wizard[/cyan]."
             )
+        elif tx_id_file.exists():
+            tx_id = tx_id_file.read_text(encoding="utf-8").strip()
+            if tx_id:
+                show_audit_link(tx_id, console)
     return exit_code
 
 

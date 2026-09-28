@@ -7,6 +7,8 @@ import os
 from langchain_core.tools import BaseTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
+from agentdna.mcp.client.langchain import install_mcp_client
+install_mcp_client()
 
 async def load_tools() -> list[BaseTool]:
     """Return the tools from every configured MCP server, as LangChain tools."""

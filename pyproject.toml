@@ -13,6 +13,8 @@ dependencies = [
     "python-dotenv",
     "questionary",
     "rich",
+    "agent-dna",
+    "cbac"
 ]
 
 [project.optional-dependencies]

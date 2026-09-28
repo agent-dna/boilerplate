@@ -5,9 +5,10 @@
 
 Steps, each in its own module:
     1. choose an LLM provider and model          llm.py, ollama.py
-    2. save the settings to .env                 settings.py
-    3. install the provider's package            settings.py
-    4. start the MCP server and run the agent    demo.py
+    2. AgentDNA API key and names                agentdna.py
+    3. save the settings to .env                 settings.py
+    4. install the provider's package            settings.py
+    5. start the MCP server and run the agent    demo.py
 """
 import argparse
 import sys
@@ -16,6 +17,7 @@ from dotenv import dotenv_values
 from rich.panel import Panel
 
 from . import ROOT
+from .agentdna import configure_agentdna
 from .content import AGENT_OVERVIEW
 from .demo import choose_prompt, run_demo
 from .llm import choose_llm
@@ -48,7 +50,8 @@ def main():
     console.print(Panel.fit(AGENT_OVERVIEW, title="[bold]Single-agent LangGraph + MCP[/bold]", border_style="cyan"))
 
     llm = choose_llm(args, interactive, existing)
-    save_env(env_file, llm)
+    agentdna = configure_agentdna(interactive, existing)
+    save_env(env_file, llm, agentdna)
     install_provider_package(llm)
 
     if args.no_run:
@@ -56,7 +59,7 @@ def main():
         return
 
     prompt = choose_prompt(args.prompt, interactive)
-    sys.exit(run_demo(llm, prompt, env_file))
+    sys.exit(run_demo(llm, agentdna, prompt, env_file))
 
 
 if __name__ == "__main__":

@@ -7,11 +7,31 @@ from urllib.parse import quote
 
 import httpx
 from fastmcp import FastMCP
+from agentdna.core import AgentDNA
+from agentdna.mcp.server.fastmcp import AgentDNAMCPMiddleware
+from dotenv import load_dotenv
+from cbac import authorize
+
+load_dotenv()
+
+MCP_SERVER = AgentDNA(
+    name=os.getenv("AGENTDNA_MCP_SERVER_NAME"),
+    type="tool",
+    provenance_layer_url=os.getenv("AGENTDNA_PROVENANCE_URL", "https://chain-connector-2-dev.rubix.net"),
+    admin_server_url=os.getenv("AGENTDNA_ADMIN_SERVER_URL", "https://agentdna-admin-dev.agentdna.io"),
+    api_key=os.getenv("AGENTDNA_API_KEY")
+)
 
 mcp = FastMCP("free-query-apis")
+mcp.add_middleware(
+    AgentDNAMCPMiddleware(
+        MCP_SERVER,
+        authorize
+    )
+)
 
 HEADERS = {"User-Agent": "single-agent-langgraph-demo/0.1 (learning project)"}
-TIMEOUT = 10.0
+TIMEOUT = 50.0
 
 
 @mcp.tool()

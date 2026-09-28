@@ -10,7 +10,6 @@ Run (after starting mcp_server.py):  python agent.py "What's the weather in Toky
 import asyncio
 import json
 import os
-import re
 import sys
 import uuid
 
@@ -22,6 +21,13 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, MessagesState, StateGraph
 
 from mcp_client import load_tools
+from wizard.audit_link import display_dashboard_info
+
+from agentdna.core import AgentDNA
+from pathlib import Path
+from agentdna.error import RESULT_OK
+from agentdna.mcp.context import agentdna_context
+from agentdna.types import IntentWorkflow
 
 load_dotenv()
 
@@ -31,38 +37,77 @@ SYSTEM_PROMPT = (
     "Only use tools when needed, and answer concisely based on tool results."
 )
 
+_HERE = Path(__file__).resolve().parent
+SKILLS_FILE = _HERE / "SKILLS.md"
+
+USER = AgentDNA(
+    name=os.getenv("AGENTDNA_USER"),
+    type="user",
+    api_key=os.getenv("AGENTDNA_API_KEY"),
+    provenance_layer_url=os.getenv("AGENTDNA_PROVENANCE_URL", "https://chain-connector-2-dev.rubix.net")
+)
+
+AGENT = AgentDNA(
+    name=os.getenv("AGENTDNA_AGENT"),
+    type="agent",
+    api_key=os.getenv("AGENTDNA_API_KEY"),
+    provenance_layer_url=os.getenv("AGENTDNA_PROVENANCE_URL", "https://chain-connector-2-dev.rubix.net"),
+    agent_policy_file=SKILLS_FILE
+)
+
 # Each lookup round takes three graph steps (model, text-tool-call check, tools),
 # so this allows about five rounds per question.
 RECURSION_LIMIT = 18
 
-# Some OpenAI-compatible servers return a tool call as plain text, e.g.
-# '<tools>{"name": "define_word", "arguments": {"word": "x"}}</tools>',
-# instead of in the structured tool_calls field.
-TEXT_TOOL_CALL_TAG = re.compile(r"<(?:tools|tool_call)>\s*")
+# Some OpenAI-compatible servers return a tool call as plain text instead of in
+# the structured tool_calls field, in varying wrappers, e.g.
+#   <tools>{"name": "define_word", "arguments": {"word": "x"}}</tools>
+#   <tool_call>{"name": "define_word", "arguments": {"word": "x"}}</tool_call>
+#   <{"name": "wikipedia_summary", "arguments": {"topic": "Alan Turing"}}>
+# The wrapper is ignored: any JSON object in the text with a known tool name
+# and an arguments object counts as a call.
+TOOL_CALL_ARGUMENT_KEYS = ("arguments", "parameters")
 
 class AgentState(MessagesState):
-    pass
+    agentdna_workflow: IntentWorkflow
 
 def parse_text_tool_calls(text: str, tool_names: set[str]) -> list[dict]:
     """Extract tool calls a model wrote as text; returns [] if there are none."""
+    decoder = json.JSONDecoder()
     calls = []
-    for tag in TEXT_TOOL_CALL_TAG.finditer(text):
+    start = text.find("{")
+    while start != -1:
         try:
-            payload, _ = json.JSONDecoder().raw_decode(text, tag.end())
+            payload, end = decoder.raw_decode(text, start)
         except json.JSONDecodeError:
+            start = text.find("{", start + 1)
             continue
-        if not isinstance(payload, dict) or payload.get("name") not in tool_names:
-            continue
-        args = payload.get("arguments", {})
-        if isinstance(args, str):
-            try:
-                args = json.loads(args)
-            except json.JSONDecodeError:
-                continue
-        if isinstance(args, dict):
-            calls.append({"name": payload["name"], "args": args,
-                          "id": f"call_{uuid.uuid4().hex[:12]}", "type": "tool_call"})
+        call = as_tool_call(payload, tool_names)
+        if call:
+            calls.append(call)
+            start = text.find("{", end)  # skip the call's own nested objects
+        else:
+            start = text.find("{", start + 1)  # a call may be nested inside
     return calls
+
+
+def as_tool_call(payload, tool_names: set[str]) -> dict | None:
+    """Return a tool call if payload is {"name": <known tool>, "arguments": {...}}."""
+    if not isinstance(payload, dict) or payload.get("name") not in tool_names:
+        return None
+    key = next((k for k in TOOL_CALL_ARGUMENT_KEYS if k in payload), None)
+    if key is None:
+        return None
+    args = payload[key]
+    if isinstance(args, str):  # some models send the arguments as a JSON string
+        try:
+            args = json.loads(args)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(args, dict):
+        return None
+    return {"name": payload["name"], "args": args,
+            "id": f"call_{uuid.uuid4().hex[:12]}", "type": "tool_call"}
 
 
 def create_llm():
@@ -130,9 +175,39 @@ def create_agent_node(tools: list):
 
     async def agent_node(state: AgentState, config: RunnableConfig) -> dict:
         """Run the agent on the conversation and return the messages it added."""
-        # Passing config on keeps the graph's recursion limit and callbacks.        
-        result = await agent.ainvoke({"messages": state["messages"]}, config)
-        return {"messages": result["messages"][len(state["messages"]):]}
+        # Passing config on keeps the graph's recursion limit and callbacks.
+        incoming_workflow = state["agentdna_workflow"]
+        if incoming_workflow is None:
+            raise RuntimeError("expected AgentDNA workflow from user")
+
+        verification_code = AGENT.verify(incoming_workflow)
+        if verification_code != RESULT_OK:
+            failed_msg = "authentication failed for the User"
+            failed_workflow = AGENT.build(
+                failed_msg,
+                previous_workflows=incoming_workflow,
+                verification_code=verification_code
+            )
+            AGENT.record(failed_workflow)
+            raise RuntimeError(failed_msg)
+
+        with agentdna_context(AGENT, incoming_workflow) as ctx:
+            result = await agent.ainvoke({"messages": state["messages"]}, config)
+            final_message = result["messages"][-1]
+
+            if len(ctx.workflows) == 0:
+                raise RuntimeError("Agent didn't get requests from other end")
+
+            updated_workflow = AGENT.build(
+                str(final_message),
+                previous_workflows=ctx.workflows
+            )
+        
+        
+        return {
+            "messages": result["messages"][len(state["messages"]):],
+            "agentdna_workflow": updated_workflow
+        }
 
     return agent_node
 
@@ -151,11 +226,24 @@ async def main():
     builder.add_edge("agent", END)
     graph = builder.compile()
 
+    question = " ".join(sys.argv[1:])
+    agentdna_workflow = USER.build(question)
+
     result = await graph.ainvoke(
-        {"messages": [{"role": "user", "content": " ".join(sys.argv[1:])}]},
+        {
+            "messages": [{"role": "user", "content": " ".join(sys.argv[1:])}],
+            "agentdna_workflow": agentdna_workflow
+        },
         {"recursion_limit": RECURSION_LIMIT},
     )
+
+    # AGENTDNA: Audit the complete conversation trail on-chain
+    _, tx_id = USER.record(result["agentdna_workflow"])
+
     print(f"\nagent> {result['messages'][-1].content}")
+
+    if tx_id:
+        display_dashboard_info(tx_id=tx_id)
 
 
 if __name__ == "__main__":

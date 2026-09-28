@@ -41,4 +41,5 @@ and repeats until it can answer. One question can use several tools.
     parts of speech (noun, verb, ...).            [dim]Free Dictionary[/dim]
 
 [bold]Next[/bold]
-Pick your LLM provider and model, then ask the agent a first question."""
+Pick your LLM provider and model, enter your AgentDNA API key and names,
+then ask the agent a first question."""

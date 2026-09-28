@@ -1,4 +1,4 @@
-"""Steps 2 and 3: save the settings to .env and install the provider's package."""
+"""Steps 3 and 4: save the settings to .env and install the provider's package."""
 import importlib.util
 import shutil
 import subprocess
@@ -7,17 +7,21 @@ from pathlib import Path
 
 from dotenv import set_key
 
+from .agentdna import API_KEY_ENV, AgentDNAConfig
 from .providers import LLMConfig
 from .ui import console, fail
 
 
-def save_env(env_file: Path, llm: LLMConfig) -> None:
+def save_env(env_file: Path, llm: LLMConfig, agentdna: AgentDNAConfig) -> None:
     """Write the chosen settings to .env, creating it readable by the owner only."""
     values = {"LLM_PROVIDER": llm.provider, "LLM_MODEL": llm.model}
     if llm.save_base_url:
         values[llm.spec["base_url_env"]] = llm.base_url
     if llm.save_api_key:
         values[llm.spec["key_env"]] = llm.api_key
+    values.update(agentdna.names)
+    if agentdna.save_api_key:
+        values[API_KEY_ENV] = agentdna.api_key
 
     env_file.touch(mode=0o600, exist_ok=True)
     for name, value in values.items():
