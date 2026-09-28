@@ -4,13 +4,21 @@ name: Deploy AgentDNA Installers
 #   dev:       a pull request merged into develop
 #   test-prod: a pull request merged into main
 # The installers are published as they are in the repository.
-# Manual runs publish the selected branch: develop to dev, main to test-prod.
+# Manual runs (Actions tab, Run workflow) publish the chosen environment from
+# its branch: dev from develop, test-prod from main.
 # See DEPLOY.md in this folder for the secrets and the server layout.
 on:
   pull_request:
     types: [closed]
     branches: [develop, main]
   workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to publish the installers for (dev publishes develop, test-prod publishes main)
+        type: choice
+        options: [dev, test-prod]
+        required: true
+        default: dev
 
 permissions:
   contents: read
@@ -21,10 +29,10 @@ jobs:
     runs-on: ubuntu-latest
     # A pull request closed without merging publishes nothing.
     if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
-    # One publish per branch at a time; a newer one waits instead of
-    # interrupting a running one.
+    # One publish per environment at a time (merged pull requests and manual
+    # runs alike); a newer one waits instead of interrupting a running one.
     concurrency:
-      group: deploy-installers-${{ github.event.pull_request.base.ref || github.ref_name }}
+      group: deploy-installers-${{ inputs.environment || (github.event.pull_request.base.ref == 'main' && 'test-prod' || 'dev') }}
       cancel-in-progress: false
 
     steps:
@@ -32,25 +40,43 @@ jobs:
         id: select
         env:
           EVENT: ${{ github.event_name }}
-          BRANCH: ${{ github.event.pull_request.base.ref || github.ref_name }}
-          SHA: ${{ github.sha }}
+          INPUT_ENVIRONMENT: ${{ inputs.environment }}
+          PR_BRANCH: ${{ github.event.pull_request.base.ref }}
           MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
-          case "$BRANCH" in
-            develop) environment=dev ;;
-            main)    environment=test-prod ;;
-            *)
-              echo "::error::Installers are published from develop (dev) or main (test-prod), not '$BRANCH'"
-              exit 1
-              ;;
-          esac
-          if [ "$EVENT" = "pull_request" ]; then ref="$MERGE_SHA"; else ref="$SHA"; fi
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            # Manual run: the chosen environment, from the latest commit of its
+            # branch (whatever branch the run was started from).
+            environment="$INPUT_ENVIRONMENT"
+            case "$environment" in
+              dev)       branch=develop ;;
+              test-prod) branch=main ;;
+              *)
+                echo "::error::Unknown environment '$environment'"
+                exit 1
+                ;;
+            esac
+            ref="$branch"
+          else
+            # Merged pull request: the environment of its base branch, from the
+            # merge commit.
+            branch="$PR_BRANCH"
+            case "$branch" in
+              develop) environment=dev ;;
+              main)    environment=test-prod ;;
+              *)
+                echo "::error::Installers are published from develop (dev) or main (test-prod), not '$branch'"
+                exit 1
+                ;;
+            esac
+            ref="$MERGE_SHA"
+          fi
           {
             echo "environment=$environment"
-            echo "branch=$BRANCH"
+            echo "branch=$branch"
             echo "ref=$ref"
           } >> "$GITHUB_OUTPUT"
-          echo "Publishing installers for $environment (branch $BRANCH, commit $ref)"
+          echo "Publishing installers for $environment (branch $branch, ref $ref)"
 
       - name: Checkout
         uses: actions/checkout@v6

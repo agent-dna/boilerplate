@@ -15,17 +15,20 @@ from `AGENTDNA_ENV` in the shell or `.env` (default `test-prod`).
 
 - A pull request closed without merging publishes nothing.
 - Direct pushes and tag pushes do not publish.
-- **Manual run:** Actions tab, *Deploy AgentDNA Installers*, *Run workflow*,
-  then select `develop` (publishes dev) or `main` (publishes test-prod). Any
-  other branch fails in the *Select environment* step.
-- Publishes for the same branch run one at a time; dev and test-prod can run
-  in parallel.
+- **Manual run (`workflow_dispatch`):** Actions tab, *Deploy AgentDNA
+  Installers*, *Run workflow*, then choose the **environment** input (`dev` or
+  `test-prod`, default `dev`). The run publishes the installers from the latest
+  commit of that environment's branch (`develop` for dev, `main` for
+  test-prod), whichever branch is selected in *Use workflow from*. Use it to
+  re-publish without a merge, for example after changing a deploy path secret.
+- Publishes for the same environment run one at a time, whether started by a
+  merge or manually; dev and test-prod can run in parallel.
 
 ## Steps
 
-1. **Select environment:** maps the pull request's base branch (or the branch
-   of a manual run) to the environment, and picks the commit: the merge commit
-   for a pull request, the branch head for a manual run.
+1. **Select environment:** for a merged pull request, maps its base branch to
+   the environment and uses the merge commit; for a manual run, takes the
+   chosen environment and uses the head of its branch.
 2. **Checkout** that commit.
 3. **Check installers:** `sh -n try.sh` (shell syntax).
 4. **Deploy:** copies the two files to a per-run temporary folder on the
@@ -66,7 +69,7 @@ git push -u origin develop
 | Symptom | Cause and fix |
 |---------|---------------|
 | Workflow does not run after a merge | The pull request targeted a branch other than `develop` or `main`. |
-| *Select environment* fails with `Installers are published from develop (dev) or main (test-prod)` | A manual run on another branch. Select `develop` or `main`. |
+| *Select environment* fails with `Installers are published from develop (dev) or main (test-prod)` | Should not happen with the configured triggers: only pull requests into `develop` or `main` start the workflow. Check `on.pull_request.branches` if the triggers were changed. |
 | `No deploy path secret for dev` (or `test-prod`) | Add `VM_DEPLOY_PATH_DEV` / `VM_DEPLOY_PATH_TEST_PROD`. |
 
 ## Adding an environment
