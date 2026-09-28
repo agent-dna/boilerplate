@@ -4,7 +4,9 @@ A minimal agentic workflow built with **LangGraph**: one agent that calls read-o
 
 ## Quick start
 
-One command downloads the project, sets it up and runs a first query.
+One command downloads the project, sets it up and runs a first query. It
+targets the test-prod environment unless `AGENTDNA_ENV` says otherwise (see
+[Environments](#environments)):
 
 ```bash
 # Linux / macOS
@@ -16,14 +18,17 @@ irm <INSTALLER_URL>/try.ps1 | iex
 ```
 
 Already have a checkout? Run `sh try.sh` or `.\try.ps1` from inside it instead.
+To target dev, set `AGENTDNA_ENV=dev` in the shell first (for example
+`curl -fsSL <INSTALLER_URL>/try.sh | AGENTDNA_ENV=dev sh`), or in `.env` of an
+existing checkout.
 
 **You need:** Python 3.10+, `git`, and one LLM: a local [Ollama](https://ollama.com), or an API key for Gemini, OpenAI, or any OpenAI-compatible endpoint (e.g. OpenRouter). To use a Python other than `python3`, set `TRY_AGENTDNA_PYTHON` to its path.
 
 **What happens:**
 
-1. Outside a checkout, the installer clones the latest stable release into `./boilerplate`. It stops if that folder already exists.
+1. Outside a checkout, the installer clones the `main` branch into `./boilerplate`. It stops if that folder already exists.
 2. It installs [uv](https://docs.astral.sh/uv/) if missing, creates `.venv` and installs the dependencies.
-3. A setup wizard asks for your LLM provider, model and API key (for Ollama, it offers to download the model), and saves them to `.env`.
+3. A setup wizard asks for your LLM provider, model and API key (for Ollama, it offers to download the model), then your AgentDNA API key and the names of your user, agent and MCP server. It saves them to `.env`, together with the environment (`AGENTDNA_ENV`).
 4. It starts the MCP server, sends the agent a demo question, prints the answer and shuts everything down.
 
 **Afterwards**, run it again from the project folder:
@@ -34,6 +39,25 @@ sh try.sh                    # re-run the wizard (Windows: .\try.ps1)
 ```
 
 Or start the pieces yourself, as in [Run](#run) below.
+
+## Environments
+
+The agent and MCP server talk to one AgentDNA environment, selected by
+`AGENTDNA_ENV`:
+
+| `AGENTDNA_ENV` | Provenance layer | Admin server | Dashboard |
+|----------------|------------------|--------------|-----------|
+| `test-prod` (default) | `https://chain-connector-2.rubix.net` | `https://agentdna-admin.agentdna.io` | `https://dashboard.agentdna.io` |
+| `dev` | `https://chain-connector-2-dev.rubix.net` | `https://agentdna-admin-dev.agentdna.io` | `https://dashboard-dev.agentdna.io` |
+
+- **Choosing:** the wizard uses `AGENTDNA_ENV` from the shell, else the value
+  saved in `.env`, else `test-prod`, and saves its choice to `.env`. The
+  installers do not set it; they are the same for every environment and clone
+  the `main` branch.
+- **Override:** `AGENTDNA_PROVENANCE_URL` and `AGENTDNA_ADMIN_SERVER_URL`
+  override a single service URL.
+- **Adding an environment:** add an entry to `ENVIRONMENTS` in
+  `wizard/environments.py`.
 
 ## Architecture
 
@@ -107,6 +131,13 @@ Or let the wizard write `.env` for you: `python -m wizard` (add `--yes --provide
 | `OPENAI_COMPATIBLE_API_KEY` | API key for the `openai_compatible` endpoint | – |
 | `MCP_PORT` | Port `mcp_server.py` listens on | `8000` |
 | `MCP_URL` | MCP server endpoint the agent connects to | `http://127.0.0.1:8000/mcp` |
+| `AGENTDNA_ENV` | AgentDNA environment: `test-prod` or `dev` (see [Environments](#environments)) | `test-prod` |
+| `AGENTDNA_API_KEY` | AgentDNA API key, from the environment's dashboard | – |
+| `AGENTDNA_USER` | Name of the AgentDNA user | – |
+| `AGENTDNA_AGENT` | Name of the agent | – |
+| `AGENTDNA_MCP_SERVER_NAME` | Name of the MCP server | – |
+| `AGENTDNA_PROVENANCE_URL` | Optional override of the environment's provenance layer URL | from `AGENTDNA_ENV` |
+| `AGENTDNA_ADMIN_SERVER_URL` | Optional override of the environment's admin server URL | from `AGENTDNA_ENV` |
 
 If using Ollama, pull a tool-calling-capable model first:
 
@@ -148,6 +179,7 @@ Type `exit` or `quit` to stop.
 | Symptom | Likely cause / fix |
 |---------|--------------------|
 | `Installation directory already exists` | A `./boilerplate` folder is already there. `cd` into it and run `sh try.sh`, or run the installer from another folder |
+| `unknown AGENTDNA_ENV '...'` | `AGENTDNA_ENV` in the shell or `.env` is not `test-prod` or `dev` |
 | `Python 3.10 or newer is required` | Install a newer Python, or point `TRY_AGENTDNA_PYTHON` at one |
 | `No interactive terminal detected` | The wizard needs a real terminal. Run the installer from one, not from CI or a non-interactive shell |
 | `Ollama isn't reachable` | Install Ollama and start it (`ollama serve`), or pick a different provider in the wizard |

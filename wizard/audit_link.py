@@ -10,8 +10,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-# Dashboard page of an audited workflow, by its Provenance Layer transaction ID.
-INTENT_URL = "https://dashboard-dev.agentdna.io/intents/{tx_id}"
+from .environments import intent_url
 
 # When set to a file path, agent.py writes the transaction ID there instead of
 # showing the link. The wizard sets it so it can show the link below its own
@@ -22,7 +21,7 @@ TX_ID_FILE_ENV = "AGENTDNA_TX_ID_FILE"
 def show_audit_link(tx_id: str, console: Console | None = None) -> None:
     """Print the dashboard link of the audited workflow and open it in a browser if possible."""
     console = console or Console()
-    url = INTENT_URL.format(tx_id=tx_id)
+    url = intent_url(tx_id)  # on the dashboard of the selected environment
     # soft_wrap keeps the URL on one line, so it stays clickable.
     console.print(
         "\nCurrent workflow has been audited and the record is stored on the Provenance Layer. "
