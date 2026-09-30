@@ -26,8 +26,10 @@ CURRENT_DIR="$(pwd)"
 #
 # Only wizard/__main__.py is used as the local-project marker.
 #
-# Local mode:
-#   Use the current directory.
+# Local mode, using an existing project without cloning:
+#   - the current directory is the project (sh try.sh run inside it), or
+#   - <current-directory>/boilerplate is the project (a re-run of
+#     curl ... | sh from the folder of an earlier install).
 #
 # Remote mode:
 #   Clone the main branch into:
@@ -38,6 +40,9 @@ CURRENT_DIR="$(pwd)"
 if [ -f "${CURRENT_DIR}/wizard/__main__.py" ]; then
     LOCAL_PROJECT="true"
     PROJECT_DIR="${CURRENT_DIR}"
+elif [ -f "${CURRENT_DIR}/${PROJECT_NAME}/wizard/__main__.py" ]; then
+    LOCAL_PROJECT="true"
+    PROJECT_DIR="${CURRENT_DIR}/${PROJECT_NAME}"
 else
     LOCAL_PROJECT="false"
     PROJECT_DIR="${CURRENT_DIR}/${PROJECT_NAME}"
@@ -65,9 +70,10 @@ else
         exit 1  # git not found
     fi
 
-    # Do not overwrite an existing directory.
+    # Do not overwrite an existing directory that is not the project (an
+    # existing project was detected above and is used instead).
     if [ -e "$PROJECT_DIR" ]; then
-        exit 1  # installation directory already exists
+        exit 1  # installation directory exists and is not an AgentDNA project
     fi
 
     # Clone into the current working directory (set -e stops on failure).

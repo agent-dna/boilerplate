@@ -30,8 +30,10 @@ $CurrentDir = (Get-Location).Path
 #
 # Only wizard/__main__.py is used as the local-project marker.
 #
-# Local mode:
-#   Use the current directory.
+# Local mode, using an existing project without cloning:
+#   - the current directory is the project (.\try.ps1 run inside it), or
+#   - <current-directory>\boilerplate is the project (a re-run of
+#     irm ... | iex from the folder of an earlier install).
 #
 # Remote mode:
 #   Clone the main branch into:
@@ -40,10 +42,15 @@ $CurrentDir = (Get-Location).Path
 # -----------------------------------------------------------------------------
 
 $LocalWizard = Join-Path $CurrentDir "wizard\__main__.py"
+$InstalledWizard = Join-Path (Join-Path $CurrentDir $ProjectName) "wizard\__main__.py"
 
 if (Test-Path -LiteralPath $LocalWizard -PathType Leaf) {
     $LocalProject = $true
     $ProjectDir = $CurrentDir
+}
+elseif (Test-Path -LiteralPath $InstalledWizard -PathType Leaf) {
+    $LocalProject = $true
+    $ProjectDir = Join-Path $CurrentDir $ProjectName
 }
 else {
     $LocalProject = $false
@@ -73,9 +80,10 @@ else {
         exit 1  # git not found
     }
 
-    # Do not overwrite an existing directory.
+    # Do not overwrite an existing directory that is not the project (an
+    # existing project was detected above and is used instead).
     if (Test-Path -LiteralPath $ProjectDir) {
-        exit 1  # installation directory already exists
+        exit 1  # installation directory exists and is not an AgentDNA project
     }
 
     # Clone into the current working directory.
