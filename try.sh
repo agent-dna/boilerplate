@@ -4,7 +4,10 @@ set -eu
 
 REPO_URL="https://github.com/agent-dna/boilerplate.git"
 PROJECT_NAME="boilerplate"
-PYTHON="${TRY_AGENTDNA_PYTHON:-python3}"
+
+# The project runs on this Python only. uv provides it (downloading it the
+# first time); the system Python, whatever its version, is not used.
+PYTHON_VERSION="3.12"
 
 command_exists() {
     command -v "$1" >/dev/null 2>&1
@@ -38,27 +41,6 @@ if [ -f "${CURRENT_DIR}/wizard/__main__.py" ]; then
 else
     LOCAL_PROJECT="false"
     PROJECT_DIR="${CURRENT_DIR}/${PROJECT_NAME}"
-fi
-
-# -----------------------------------------------------------------------------
-# Check Python (3.10 or newer)
-# -----------------------------------------------------------------------------
-
-if ! command_exists "$PYTHON"; then
-    exit 1  # Python not found
-fi
-
-PYTHON_MAJOR="$(
-    "$PYTHON" -c 'import sys; print(sys.version_info[0])'
-)"
-
-PYTHON_MINOR="$(
-    "$PYTHON" -c 'import sys; print(sys.version_info[1])'
-)"
-
-if [ "$PYTHON_MAJOR" -lt 3 ] ||
-   { [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 10 ]; }; then
-    exit 1  # Python older than 3.10
 fi
 
 # -----------------------------------------------------------------------------
@@ -143,10 +125,21 @@ fi
 VENV_DIR="${PROJECT_DIR}/.venv"
 PYTHON_BIN="${VENV_DIR}/bin/python"
 
+# An existing .venv on another Python version (for example one created from
+# the system Python by an earlier installer) is replaced.
+if [ -d "$VENV_DIR" ] &&
+   ! "$PYTHON_BIN" -c "import sys; sys.exit('%d.%d' % sys.version_info[:2] != '${PYTHON_VERSION}')" 2>/dev/null; then
+    rm -rf "$VENV_DIR"
+fi
+
+# only-managed: use a Python installed by uv, never the system's; uv downloads
+# it on first use. (Also understood by older uv versions, unlike
+# --managed-python.)
 if [ ! -d "$VENV_DIR" ]; then
     uv venv \
         "$VENV_DIR" \
-        --python "$PYTHON"
+        --python "$PYTHON_VERSION" \
+        --python-preference only-managed
 fi
 
 if [ ! -x "$PYTHON_BIN" ]; then
