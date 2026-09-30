@@ -22,12 +22,12 @@ To target dev, set `AGENTDNA_ENV=dev` in the shell first (for example
 `curl -fsSL <INSTALLER_URL>/try.sh | AGENTDNA_ENV=dev sh`), or in `.env` of an
 existing checkout.
 
-**You need:** Python 3.10+, `git`, and one LLM: a local [Ollama](https://ollama.com), or an API key for Gemini, OpenAI, or any OpenAI-compatible endpoint (e.g. OpenRouter). To use a Python other than `python3`, set `TRY_AGENTDNA_PYTHON` to its path.
+**You need:** `git`, internet access, and one LLM: a local [Ollama](https://ollama.com), or an API key for Gemini, OpenAI, or any OpenAI-compatible endpoint (e.g. OpenRouter). No Python installation is needed: the project runs on Python 3.12, which the installer gets through uv whatever Python the system has (see step 2).
 
 **What happens:**
 
 1. Outside a checkout, the installer clones the `main` branch into `./boilerplate`. It stops if that folder already exists.
-2. It installs [uv](https://docs.astral.sh/uv/) if missing, creates `.venv` and installs the dependencies.
+2. It installs [uv](https://docs.astral.sh/uv/) if missing, then creates `.venv` on a uv-managed Python 3.12 (downloaded once, about 30 MB, into uv's own folder; the system Python is neither used nor changed) and installs the dependencies. An existing `.venv` on another Python version is replaced.
 3. A setup wizard asks for your LLM provider, model and API key (for Ollama, it offers to download the model), then your AgentDNA API key and the names of your user, agent and MCP server. It saves them to `.env`, together with the environment (`AGENTDNA_ENV`).
 4. It starts the MCP server, sends the agent a demo question, prints the answer and shuts everything down.
 
@@ -108,8 +108,10 @@ The agent and MCP server talk to one AgentDNA environment, selected by
 
 Only needed if you'd rather not use the installer.
 
+The project requires Python 3.12 exactly (`requires-python` in `pyproject.toml`, and `.python-version`).
+
 ```bash
-uv venv .venv
+uv venv .venv --python 3.12 --python-preference only-managed   # uv-managed 3.12, downloaded if needed
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 uv pip install -r pyproject.toml --extra ollama   # or gemini, openai, openai_compatible, all
 
@@ -180,7 +182,7 @@ Type `exit` or `quit` to stop.
 |---------|--------------------|
 | `Installation directory already exists` | A `./boilerplate` folder is already there. `cd` into it and run `sh try.sh`, or run the installer from another folder |
 | `unknown AGENTDNA_ENV '...'` | `AGENTDNA_ENV` in the shell or `.env` is not `test-prod` or `dev` |
-| `Python 3.10 or newer is required` | Install a newer Python, or point `TRY_AGENTDNA_PYTHON` at one |
+| Dependency install fails with a `requires-python` / "3.12" error | The `.venv` is not on Python 3.12. Delete `.venv` and run the installer again, or create it as in [Manual setup](#manual-setup) |
 | `No interactive terminal detected` | The wizard needs a real terminal. Run the installer from one, not from CI or a non-interactive shell |
 | `Ollama isn't reachable` | Install Ollama and start it (`ollama serve`), or pick a different provider in the wizard |
 | Connection refused on startup | MCP server isn't running, or `MCP_URL` doesn't match `MCP_PORT` |

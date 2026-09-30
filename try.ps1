@@ -3,12 +3,9 @@ $ErrorActionPreference = "Stop"
 $RepoUrl = "https://github.com/agent-dna/boilerplate.git"
 $ProjectName = "boilerplate"
 
-$Python = if ($env:TRY_AGENTDNA_PYTHON) {
-    $env:TRY_AGENTDNA_PYTHON
-}
-else {
-    "python"
-}
+# The project runs on this Python only. uv provides it (downloading it the
+# first time); the system Python, whatever its version, is not used.
+$PythonVersion = "3.12"
 
 function Test-CommandExists {
     param(
@@ -51,27 +48,6 @@ if (Test-Path -LiteralPath $LocalWizard -PathType Leaf) {
 else {
     $LocalProject = $false
     $ProjectDir = Join-Path $CurrentDir $ProjectName
-}
-
-# -----------------------------------------------------------------------------
-# Check Python (3.10 or newer)
-# -----------------------------------------------------------------------------
-
-if (-not (Test-CommandExists $Python)) {
-    exit 1  # Python not found
-}
-
-$PythonMajor = & $Python -c "import sys; print(sys.version_info[0])"
-$PythonMinor = & $Python -c "import sys; print(sys.version_info[1])"
-
-if (
-    [int]$PythonMajor -lt 3 -or
-    (
-        [int]$PythonMajor -eq 3 -and
-        [int]$PythonMinor -lt 10
-    )
-) {
-    exit 1  # Python older than 3.10
 }
 
 # -----------------------------------------------------------------------------
@@ -157,11 +133,31 @@ if (-not (Test-CommandExists "uv")) {
 $VenvDir = Join-Path $ProjectDir ".venv"
 $PythonBin = Join-Path $VenvDir "Scripts\python.exe"
 
+# An existing .venv on another Python version (for example one created from
+# the system Python by an earlier installer) is replaced.
+if (Test-Path -LiteralPath $VenvDir -PathType Container) {
+
+    $VenvMatches = $false
+
+    if (Test-Path -LiteralPath $PythonBin -PathType Leaf) {
+        & $PythonBin -c "import sys; sys.exit('%d.%d' % sys.version_info[:2] != '$PythonVersion')"
+        $VenvMatches = ($LASTEXITCODE -eq 0)
+    }
+
+    if (-not $VenvMatches) {
+        Remove-Item -LiteralPath $VenvDir -Recurse -Force
+    }
+}
+
+# only-managed: use a Python installed by uv, never the system's; uv downloads
+# it on first use. (Also understood by older uv versions, unlike
+# --managed-python.)
 if (-not (Test-Path -LiteralPath $VenvDir -PathType Container)) {
 
     & uv venv `
         $VenvDir `
-        --python $Python
+        --python $PythonVersion `
+        --python-preference only-managed
 
     if ($LASTEXITCODE -ne 0) {
         exit 1  # virtual environment creation failed
