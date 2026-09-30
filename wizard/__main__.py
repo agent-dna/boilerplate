@@ -23,7 +23,7 @@ from .demo import choose_prompt, run_demo
 from .llm import choose_llm
 from .providers import PROVIDERS
 from .settings import install_provider_package, save_env
-from .ui import console, fail
+from .ui import console, fail, use_tty_compatible_event_loop
 
 
 def parse_args() -> argparse.Namespace:
@@ -44,6 +44,9 @@ def main():
 
     if interactive and not (sys.stdin.isatty() and sys.stdout.isatty()):
         fail("[red]No interactive terminal detected.[/red] Re-run with --yes (see --help).")
+
+    # Before the first prompt: the prompts' event loop must work with /dev/tty.
+    use_tty_compatible_event_loop()
 
     env_file = ROOT / ".env"
     existing = dotenv_values(env_file) if env_file.exists() else {}
