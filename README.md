@@ -26,17 +26,19 @@ existing checkout.
 
 **What happens:**
 
-1. Outside a checkout, the installer clones the `main` branch into `./boilerplate`. It stops if that folder already exists.
+1. Outside a checkout, the installer clones the `main` branch into `./boilerplate`. If `./boilerplate` already holds the project (from an earlier run), it uses that folder instead, without cloning or updating it. It stops if `./boilerplate` exists but is not the project.
 2. It installs [uv](https://docs.astral.sh/uv/) if missing, then creates `.venv` on a uv-managed Python 3.12 (downloaded once, about 30 MB, into uv's own folder; the system Python is neither used nor changed) and installs the dependencies. An existing `.venv` on another Python version is replaced.
 3. A setup wizard asks for your LLM provider, model and API key (for Ollama, it offers to download the model), then your AgentDNA API key and the names of your user, agent and MCP server. It saves them to `.env`, together with the environment (`AGENTDNA_ENV`).
 4. It starts the MCP server, sends the agent a demo question, prints the answer and shuts everything down.
 
-**Afterwards**, run it again from the project folder:
+**Afterwards**, run the same one-line command again from the same folder, or run the installer from the project folder:
 
 ```bash
 cd boilerplate
 sh try.sh                    # re-run the wizard (Windows: .\try.ps1)
 ```
+
+Both reuse the existing project, `.venv` and `.env`.
 
 Or start the pieces yourself, as in [Run](#run) below.
 
@@ -180,7 +182,7 @@ Type `exit` or `quit` to stop.
 
 | Symptom | Likely cause / fix |
 |---------|--------------------|
-| `Installation directory already exists` | A `./boilerplate` folder is already there. `cd` into it and run `sh try.sh`, or run the installer from another folder |
+| Installer exits right away, with nothing installed | A `./boilerplate` folder that is not this project is in the way. Rename or remove it, or run the installer from another folder |
 | `unknown AGENTDNA_ENV '...'` | `AGENTDNA_ENV` in the shell or `.env` is not `test-prod` or `dev` |
 | Dependency install fails with a `requires-python` / "3.12" error | The `.venv` is not on Python 3.12. Delete `.venv` and run the installer again, or create it as in [Manual setup](#manual-setup) |
 | `No interactive terminal detected` | The wizard needs a real terminal. Run the installer from one, not from CI or a non-interactive shell |
