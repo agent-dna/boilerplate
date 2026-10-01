@@ -9,6 +9,44 @@ PROJECT_NAME="boilerplate"
 # first time); the system Python, whatever its version, is not used.
 PYTHON_VERSION="3.12"
 
+# -----------------------------------------------------------------------------
+# Options
+#
+#   --branch <name>   Use this git branch instead of main (for debugging).
+#                     A new install clones it; an existing project is switched
+#                     to it before the rest of the setup.
+#
+# Through curl, pass options after "sh -s --":
+#
+#   curl -fsSL https://try.agentdna.io | sh -s -- --branch develop
+# -----------------------------------------------------------------------------
+
+BRANCH=""
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --branch)
+            if [ "$#" -lt 2 ]; then
+                exit 1  # --branch needs a value
+            fi
+            BRANCH="$2"
+            shift 2
+            ;;
+        --branch=*)
+            BRANCH="${1#--branch=}"
+            shift
+            ;;
+        *)
+            exit 1  # unknown option
+            ;;
+    esac
+done
+
+# A value starting with "-" would be read by git as an option.
+case "$BRANCH" in
+    -*) exit 1 ;;  # invalid branch name
+esac
+
 command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
@@ -58,6 +96,24 @@ if [ "$LOCAL_PROJECT" = "true" ]; then
 
     cd "$PROJECT_DIR"
 
+    # --branch: switch the existing project to that branch. A local branch of
+    # that name is checked out as it is; otherwise it is fetched from GitHub
+    # (an installer clone has only main) and created from the remote branch.
+    if [ -n "$BRANCH" ]; then
+
+        if ! command_exists git; then
+            exit 1  # git not found
+        fi
+
+        if git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
+            git checkout "$BRANCH"
+        else
+            git fetch --depth 1 origin "$BRANCH"
+            git checkout -b "$BRANCH" FETCH_HEAD
+        fi
+
+    fi
+
 else
 
     # -------------------------------------------------------------------------
@@ -77,9 +133,10 @@ else
     fi
 
     # Clone into the current working directory (set -e stops on failure).
+    # main, or the branch given with --branch.
     git clone \
         --depth 1 \
-        --branch main \
+        --branch "${BRANCH:-main}" \
         --single-branch \
         "$REPO_URL" \
         "$PROJECT_DIR"
