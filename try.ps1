@@ -1,4 +1,25 @@
+# -----------------------------------------------------------------------------
+# Options
+#
+#   -Branch <name>   Use this git branch instead of main (for debugging).
+#                    A new install clones it; an existing project is switched
+#                    to it before the rest of the setup.
+#
+# Through irm, run the downloaded script as a script block to pass options:
+#
+#   & ([scriptblock]::Create((irm https://try.agentdna.io))) -Branch develop
+# -----------------------------------------------------------------------------
+
+param(
+    [string]$Branch = ""
+)
+
 $ErrorActionPreference = "Stop"
+
+# A value starting with "-" would be read by git as an option.
+if ($Branch.StartsWith("-")) {
+    exit 1  # invalid branch name
+}
 
 $RepoUrl = "https://github.com/agent-dna/boilerplate.git"
 $ProjectName = "boilerplate"
@@ -67,6 +88,35 @@ if ($LocalProject) {
 
     Set-Location $ProjectDir
 
+    # -Branch: switch the existing project to that branch. A local branch of
+    # that name is checked out as it is; otherwise it is fetched from GitHub
+    # (an installer clone has only main) and created from the remote branch.
+    if ($Branch) {
+
+        if (-not (Test-CommandExists "git")) {
+            exit 1  # git not found
+        }
+
+        & git show-ref --verify --quiet "refs/heads/$Branch"
+
+        if ($LASTEXITCODE -eq 0) {
+            & git checkout $Branch
+        }
+        else {
+            & git fetch --depth 1 origin $Branch
+
+            if ($LASTEXITCODE -ne 0) {
+                exit 1  # branch could not be fetched
+            }
+
+            & git checkout -b $Branch FETCH_HEAD
+        }
+
+        if ($LASTEXITCODE -ne 0) {
+            exit 1  # branch checkout failed
+        }
+    }
+
 }
 else {
 
@@ -86,10 +136,13 @@ else {
         exit 1  # installation directory exists and is not an AgentDNA project
     }
 
-    # Clone into the current working directory.
+    # Clone into the current working directory: main, or the branch given
+    # with -Branch.
+    $CloneBranch = if ($Branch) { $Branch } else { "main" }
+
     & git clone `
         --depth 1 `
-        --branch main `
+        --branch $CloneBranch `
         --single-branch `
         $RepoUrl `
         $ProjectDir
