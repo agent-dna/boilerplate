@@ -29,7 +29,7 @@ existing checkout.
 1. Outside a checkout, the installer clones the `main` branch into `./boilerplate`. If `./boilerplate` already holds the project (from an earlier run), it uses that folder instead, without cloning or updating it. It stops if `./boilerplate` exists but is not the project.
 2. It installs [uv](https://docs.astral.sh/uv/) if missing, then creates `.venv` on a uv-managed Python 3.12 (downloaded once, about 30 MB, into uv's own folder; the system Python is neither used nor changed) and installs the dependencies. An existing `.venv` on another Python version is replaced.
 3. A setup wizard asks for your LLM provider, model and API key (for Ollama, it offers to download the model), then your AgentDNA API key and the names of your user, agent and MCP server. It saves them to `.env`, together with the environment (`AGENTDNA_ENV`).
-4. It starts the MCP server, sends the agent a demo question, prints the answer and shuts everything down.
+4. It starts the MCP server, sends the agent a first question and prints the answer with the link to its audit record. It then asks whether to ask another question; answering yes shows the same choice of sample questions (or your own) again. Each question is answered on its own, without memory of earlier ones. Everything shuts down when you are done.
 
 **Afterwards**, run the same one-line command again from the same folder, or run the installer from the project folder:
 

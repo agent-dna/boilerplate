@@ -62,7 +62,7 @@ def main():
         return
 
     prompt = choose_prompt(args.prompt, interactive)
-    sys.exit(run_demo(llm, agentdna, prompt, env_file))
+    sys.exit(run_demo(llm, agentdna, prompt, env_file, interactive))
 
 
 if __name__ == "__main__":
