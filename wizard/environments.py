@@ -2,8 +2,8 @@
 
 The environment is selected by AGENTDNA_ENV (default "test-prod"), set in .env
 or the shell. The wizard saves it to .env, where agent.py and mcp_server.py
-read it. AGENTDNA_PROVENANCE_URL and AGENTDNA_ADMIN_SERVER_URL, when set, override
-the environment's value for that service.
+read it. AGENTDNA_PROVENANCE_URL, AGENTDNA_ADMIN_SERVER_URL and AGENTDNA_CBAC_URL,
+when set, override the environment's value for that service.
 """
 import os
 from dataclasses import dataclass
@@ -13,6 +13,7 @@ DEFAULT_ENVIRONMENT = "test-prod"
 
 PROVENANCE_URL_ENV = "AGENTDNA_PROVENANCE_URL"
 ADMIN_SERVER_URL_ENV = "AGENTDNA_ADMIN_SERVER_URL"
+CBAC_URL_ENV = "AGENTDNA_CBAC_URL"
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class Environment:
     provenance_url: str
     admin_server_url: str
     dashboard_url: str
+    cbac_url: str  # CBAC service used by the MCP server's authorization check
 
 
 # To add an environment, add an entry here. If it gets its own installer
@@ -29,11 +31,13 @@ ENVIRONMENTS = {
         provenance_url="https://chain-connector-2-dev.rubix.net",
         admin_server_url="https://agentdna-admin-dev.agentdna.io",
         dashboard_url="https://dashboard-dev.agentdna.io",
+        cbac_url="https://cbac-service-dev.agentdna.io",
     ),
     "test-prod": Environment(
         provenance_url="https://chain-connector-2.rubix.net",
         admin_server_url="https://agentdna-admin.agentdna.io",
         dashboard_url="https://dashboard.agentdna.io",
+        cbac_url="https://cbac-service.agentdna.io",
     ),
 }
 
@@ -63,6 +67,11 @@ def provenance_url() -> str:
 def admin_server_url() -> str:
     """AGENTDNA_ADMIN_SERVER_URL if set, else the environment's admin server."""
     return _env(ADMIN_SERVER_URL_ENV) or current().admin_server_url
+
+
+def cbac_url() -> str:
+    """AGENTDNA_CBAC_URL if set, else the environment's CBAC service."""
+    return _env(CBAC_URL_ENV) or current().cbac_url
 
 
 def intent_url(tx_id: str) -> str:

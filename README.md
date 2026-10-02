@@ -58,17 +58,17 @@ Or start the pieces yourself, as in [Run](#run) below.
 The agent and MCP server talk to one AgentDNA environment, selected by
 `AGENTDNA_ENV`:
 
-| `AGENTDNA_ENV` | Provenance layer | Admin server | Dashboard |
-|----------------|------------------|--------------|-----------|
-| `test-prod` (default) | `https://chain-connector-2.rubix.net` | `https://agentdna-admin.agentdna.io` | `https://dashboard.agentdna.io` |
-| `dev` | `https://chain-connector-2-dev.rubix.net` | `https://agentdna-admin-dev.agentdna.io` | `https://dashboard-dev.agentdna.io` |
+| `AGENTDNA_ENV` | Provenance layer | Admin server | Dashboard | CBAC service |
+|----------------|------------------|--------------|-----------|--------------|
+| `test-prod` (default) | `https://chain-connector-2.rubix.net` | `https://agentdna-admin.agentdna.io` | `https://dashboard.agentdna.io` | `https://cbac-service.agentdna.io` |
+| `dev` | `https://chain-connector-2-dev.rubix.net` | `https://agentdna-admin-dev.agentdna.io` | `https://dashboard-dev.agentdna.io` | `https://cbac-service-dev.agentdna.io` |
 
 - **Choosing:** the wizard uses `AGENTDNA_ENV` from the shell, else the value
   saved in `.env`, else `test-prod`, and saves its choice to `.env`. The
   installers do not set it; they are the same for every environment and clone
   the `main` branch.
-- **Override:** `AGENTDNA_PROVENANCE_URL` and `AGENTDNA_ADMIN_SERVER_URL`
-  override a single service URL.
+- **Override:** `AGENTDNA_PROVENANCE_URL`, `AGENTDNA_ADMIN_SERVER_URL` and
+  `AGENTDNA_CBAC_URL` override a single service URL.
 - **Adding an environment:** add an entry to `ENVIRONMENTS` in
   `wizard/environments.py`.
 
@@ -153,6 +153,7 @@ Or let the wizard write `.env` for you: `python -m wizard` (add `--yes --provide
 | `AGENTDNA_MCP_SERVER_NAME` | Name of the MCP server | – |
 | `AGENTDNA_PROVENANCE_URL` | Optional override of the environment's provenance layer URL | from `AGENTDNA_ENV` |
 | `AGENTDNA_ADMIN_SERVER_URL` | Optional override of the environment's admin server URL | from `AGENTDNA_ENV` |
+| `AGENTDNA_CBAC_URL` | Optional override of the environment's CBAC service URL (MCP server authorization) | from `AGENTDNA_ENV` |
 
 If using Ollama, pull a tool-calling-capable model first:
 
