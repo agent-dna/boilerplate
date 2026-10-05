@@ -74,9 +74,9 @@ def cbac_url() -> str:
     return _env(CBAC_URL_ENV) or current().cbac_url
 
 
-def intent_url(tx_id: str) -> str:
+def intent_url(intent_id: str) -> str:
     """Dashboard page of an audited workflow, by its Provenance Layer transaction ID."""
-    return f"{current().dashboard_url}/intents/{tx_id}"
+    return f"{current().dashboard_url}/intents/{intent_id}"
 
 
 def _env(name: str) -> str:

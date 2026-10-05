@@ -239,12 +239,12 @@ async def main():
     )
 
     # AGENTDNA: Audit the complete conversation trail on-chain
-    _, tx_id = USER.record(result["agentdna_workflow"])
+    intent_id, tx_id = USER.record(result["agentdna_workflow"])
 
     print(f"\nagent> {result['messages'][-1].content}")
 
     if tx_id:
-        display_dashboard_info(tx_id=tx_id)
+        display_dashboard_info(intent_id=intent_id)
 
 
 if __name__ == "__main__":
