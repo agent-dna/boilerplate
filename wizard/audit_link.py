@@ -18,10 +18,10 @@ from .environments import intent_url
 TX_ID_FILE_ENV = "AGENTDNA_TX_ID_FILE"
 
 
-def show_audit_link(tx_id: str, console: Console | None = None) -> None:
+def show_audit_link(intent_id: str, console: Console | None = None) -> None:
     """Print the dashboard link of the audited workflow and open it in a browser if possible."""
     console = console or Console()
-    url = intent_url(tx_id)  # on the dashboard of the selected environment
+    url = intent_url(intent_id)  # on the dashboard of the selected environment
     # soft_wrap keeps the URL on one line, so it stays clickable.
     console.print(
         "\nCurrent workflow has been audited and the record is stored on the Provenance Layer. "
@@ -47,11 +47,11 @@ def has_desktop() -> bool:
         return bool(os.getenv("DISPLAY") or os.getenv("WAYLAND_DISPLAY"))
     return True
 
-def display_dashboard_info(tx_id: str):
+def display_dashboard_info(intent_id: str):
     # Under the wizard, hand the ID over so the link appears after the
     # wizard's own output; otherwise show it here.
         handoff_file = os.getenv(TX_ID_FILE_ENV)
         if handoff_file:
-            Path(handoff_file).write_text(tx_id, encoding="utf-8")
+            Path(handoff_file).write_text(intent_id, encoding="utf-8")
         else:
-            show_audit_link(tx_id)
+            show_audit_link(intent_id)
