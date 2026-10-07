@@ -13,7 +13,7 @@ import questionary
 from . import ROOT
 from .agentdna import AgentDNAConfig
 from .audit_link import TX_ID_FILE_ENV, show_audit_link
-from .content import DEMO_PROMPT, SAMPLE_PROMPTS
+from .content import SAMPLE_PROMPTS
 from .providers import LLMConfig
 from .ui import NO_HIGHLIGHT_BOX_STYLE, console, fail
 
@@ -32,7 +32,7 @@ def choose_prompt(prompt_arg: str | None, interactive: bool, message: str = "Try
         ).unsafe_ask()
         if prompt == own_question:
             prompt = questionary.text("Your question:").unsafe_ask().strip()
-    return prompt or DEMO_PROMPT
+    return prompt
 
 
 def run_demo(llm: LLMConfig, agentdna: AgentDNAConfig, prompt: str, env_file: Path, interactive: bool) -> int:
