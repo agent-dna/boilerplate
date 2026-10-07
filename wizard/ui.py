@@ -4,7 +4,11 @@ import selectors
 import sys
 from typing import NoReturn
 
+from prompt_toolkit import print_formatted_text
+from prompt_toolkit.formatted_text import FormattedText
+from prompt_toolkit.styles import merge_styles
 from questionary import Style
+from questionary.constants import DEFAULT_QUESTION_PREFIX, DEFAULT_STYLE
 from rich.console import Console
 
 console = Console()
@@ -21,6 +25,17 @@ NO_HIGHLIGHT_BOX_STYLE = Style([("selected", "noreverse noblink nobold nounderli
 # questionary/prompt_toolkit's incremental redraw, so the highlight can stop
 # tracking the selection even though the pointer still moves correctly.
 MAX_CHOICE_WIDTH = 74
+
+
+def print_answered(message: str, answer: str) -> None:
+    """Print a question and its answer exactly as questionary leaves an answered
+    prompt on screen ("? message answer"), for prompts erased when done."""
+    tokens = FormattedText([
+        ("class:qmark", DEFAULT_QUESTION_PREFIX),
+        ("class:question", f" {message} "),
+        ("class:answer", answer),
+    ])
+    print_formatted_text(tokens, style=merge_styles([DEFAULT_STYLE, NO_HIGHLIGHT_BOX_STYLE]))
 
 
 def fail(message: str) -> NoReturn:
