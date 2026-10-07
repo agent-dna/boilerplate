@@ -15,24 +15,31 @@ from .agentdna import AgentDNAConfig
 from .audit_link import TX_ID_FILE_ENV, show_audit_link
 from .content import SAMPLE_PROMPTS
 from .providers import LLMConfig
-from .ui import NO_HIGHLIGHT_BOX_STYLE, console, fail
+from .ui import NO_HIGHLIGHT_BOX_STYLE, console, fail, print_answered
 
 SERVER_START_TIMEOUT = 30  # seconds
 
 
-def choose_prompt(prompt_arg: str | None, interactive: bool, message: str = "Try a first question:") -> str:
+def choose_prompt(prompt_arg: str | None, interactive: bool, message: str = "Ask your question:") -> str:
     """Return the question for the demo run: from --prompt, a sample, or typed by the user."""
     prompt = prompt_arg
     if prompt is None and interactive:
         own_question = "Ask my own question"
-        prompt = questionary.select(
+        menu = questionary.select(
             message,
             choices=SAMPLE_PROMPTS + [own_question],
             style=NO_HIGHLIGHT_BOX_STYLE,
-        ).unsafe_ask()
+        )
+        # Erase the menu once answered, so "Ask my own question" never stays on
+        # screen: that choice is replaced by a text box with the same title,
+        # and a sample is printed back as the usual answered line.
+        menu.application.erase_when_done = True
+        prompt = menu.unsafe_ask()
         if prompt == own_question:
-            prompt = questionary.text("Your question:").unsafe_ask().strip()
-    return prompt
+            prompt = questionary.text(message).unsafe_ask().strip()
+        else:
+            print_answered(message, prompt)
+    return prompt or DEMO_PROMPT
 
 
 def run_demo(llm: LLMConfig, agentdna: AgentDNAConfig, prompt: str, env_file: Path, interactive: bool) -> int:
@@ -40,8 +47,9 @@ def run_demo(llm: LLMConfig, agentdna: AgentDNAConfig, prompt: str, env_file: Pa
     mode, on further questions for as long as the user wants.
 
     Each question is a separate agent run: the agent keeps no memory between
-    them. The MCP server stays up for all of them. Returns the exit code of the
-    last agent run.
+    them. The MCP server stays up for all of them. A failed run (an exception
+    in agent.py) does not end the session: its error is shown and the user can
+    ask another question. Returns the exit code of the last agent run.
     """
     port = find_free_port()
     # Both processes get the settings chosen in this run, whether or not they
@@ -65,9 +73,9 @@ def run_demo(llm: LLMConfig, agentdna: AgentDNAConfig, prompt: str, env_file: Pa
         while True:
             exit_code = ask_agent(env, prompt, tx_id_file, env_file)
 
-            # Stop after a failed run (its hint is printed), in --yes mode, or
-            # when the user is done.
-            if exit_code != 0 or not interactive:
+            # --yes mode runs one question only. In interactive mode, ask again
+            # whether the run succeeded or failed.
+            if not interactive:
                 return exit_code
             if not questionary.confirm("Ask another question?", default=True).unsafe_ask():
                 return exit_code
@@ -87,8 +95,8 @@ def ask_agent(env: dict, prompt: str, tx_id_file: Path, env_file: Path) -> int:
 
     if exit_code != 0:
         console.print(
-            "[red]The agent run failed.[/red] Check the provider, model, API keys and AgentDNA "
-            f"settings in {env_file}, then re-run [cyan]python -m wizard[/cyan]."
+            "[red]The agent run failed[/red] (see the error above). If every question fails, "
+            f"check the provider, model, API keys and AgentDNA settings in {env_file}."
         )
     elif tx_id_file.exists():
         tx_id = tx_id_file.read_text(encoding="utf-8").strip()
