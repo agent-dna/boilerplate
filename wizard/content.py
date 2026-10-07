@@ -1,16 +1,13 @@
 """Text shown to the user: the agent overview and the sample questions."""
 from .ui import MAX_CHOICE_WIDTH
 
-DEMO_PROMPT = "What's the weather in Tokyo, and what are Japan's capital and population?"
-
 # Offered as choices for the first question, so each must fit on one line.
 SAMPLE_PROMPTS = [
-    DEMO_PROMPT,
     "What's the weather in Pune right now?",
-    # wikipedia_summary needs an exact article title, and asking for the
-    # dictionary by name makes a tool call clearly expected.
     "Look up Alan Turing on Wikipedia.",
     'What does the dictionary say "serendipity" means?',
+    "What is the travel time between Manchester and Singapore?",
+    "Translate the word ephemeral into French."
 ]
 assert all(len(p) <= MAX_CHOICE_WIDTH for p in SAMPLE_PROMPTS)
 

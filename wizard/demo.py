@@ -13,7 +13,7 @@ import questionary
 from . import ROOT
 from .agentdna import AgentDNAConfig
 from .audit_link import TX_ID_FILE_ENV, show_audit_link
-from .content import DEMO_PROMPT, SAMPLE_PROMPTS
+from .content import SAMPLE_PROMPTS
 from .providers import LLMConfig
 from .ui import NO_HIGHLIGHT_BOX_STYLE, console, fail, print_answered
 
