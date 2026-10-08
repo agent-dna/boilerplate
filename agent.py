@@ -21,14 +21,6 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, MessagesState, StateGraph
 
 from mcp_client import load_tools
-from wizard import environments
-from wizard.audit_link import display_dashboard_info
-
-from agentdna.core import AgentDNA
-from pathlib import Path
-from agentdna.error import RESULT_OK
-from agentdna.mcp.context import agentdna_context
-from agentdna.types import IntentWorkflow
 
 load_dotenv()
 
@@ -36,24 +28,6 @@ SYSTEM_PROMPT = (
     "You are a helpful research assistant. Use the available tools to look up "
     "weather, Wikipedia summaries, country facts and word definitions. "
     "Only use tools when needed, and answer concisely based on tool results."
-)
-
-_HERE = Path(__file__).resolve().parent
-SKILLS_FILE = _HERE / "SKILLS.md"
-
-USER = AgentDNA(
-    name=os.getenv("AGENTDNA_USER"),
-    type="user",
-    api_key=os.getenv("AGENTDNA_API_KEY"),
-    provenance_layer_url=environments.provenance_url()
-)
-
-AGENT = AgentDNA(
-    name=os.getenv("AGENTDNA_AGENT"),
-    type="agent",
-    api_key=os.getenv("AGENTDNA_API_KEY"),
-    provenance_layer_url=environments.provenance_url(),
-    agent_policy_file=SKILLS_FILE
 )
 
 # Each lookup round takes three graph steps (model, text-tool-call check, tools),
@@ -69,8 +43,11 @@ RECURSION_LIMIT = 18
 # and an arguments object counts as a call.
 TOOL_CALL_ARGUMENT_KEYS = ("arguments", "parameters")
 
+
 class AgentState(MessagesState):
-    agentdna_workflow: IntentWorkflow
+    """State of the graph: the conversation messages. Add fields here to carry
+    more data between nodes."""
+
 
 def parse_text_tool_calls(text: str, tool_names: set[str]) -> list[dict]:
     """Extract tool calls a model wrote as text; returns [] if there are none."""
@@ -177,38 +154,8 @@ def create_agent_node(tools: list):
     async def agent_node(state: AgentState, config: RunnableConfig) -> dict:
         """Run the agent on the conversation and return the messages it added."""
         # Passing config on keeps the graph's recursion limit and callbacks.
-        incoming_workflow = state["agentdna_workflow"]
-        if incoming_workflow is None:
-            raise RuntimeError("expected AgentDNA workflow from user")
-
-        verification_code = AGENT.verify(incoming_workflow)
-        if verification_code != RESULT_OK:
-            failed_msg = "authentication failed for the User"
-            failed_workflow = AGENT.build(
-                failed_msg,
-                previous_workflows=incoming_workflow,
-                verification_code=verification_code
-            )
-            AGENT.record(failed_workflow)
-            raise RuntimeError(failed_msg)
-
-        with agentdna_context(AGENT, incoming_workflow) as ctx:
-            result = await agent.ainvoke({"messages": state["messages"]}, config)
-            final_message = result["messages"][-1]
-
-            if len(ctx.workflows) == 0:
-                raise RuntimeError("Agent didn't get requests from other end")
-
-            updated_workflow = AGENT.build(
-                str(final_message),
-                previous_workflows=ctx.workflows
-            )
-        
-        
-        return {
-            "messages": result["messages"][len(state["messages"]):],
-            "agentdna_workflow": updated_workflow
-        }
+        result = await agent.ainvoke({"messages": state["messages"]}, config)
+        return {"messages": result["messages"][len(state["messages"]):]}
 
     return agent_node
 
@@ -228,23 +175,11 @@ async def main():
     graph = builder.compile()
 
     question = " ".join(sys.argv[1:])
-    agentdna_workflow = USER.build(question)
-
     result = await graph.ainvoke(
-        {
-            "messages": [{"role": "user", "content": " ".join(sys.argv[1:])}],
-            "agentdna_workflow": agentdna_workflow
-        },
+        {"messages": [{"role": "user", "content": question}]},
         {"recursion_limit": RECURSION_LIMIT},
     )
-
-    # AGENTDNA: Audit the complete conversation trail on-chain
-    intent_id, tx_id = USER.record(result["agentdna_workflow"])
-
     print(f"\nagent> {result['messages'][-1].content}")
-
-    if tx_id:
-        display_dashboard_info(intent_id=intent_id)
 
 
 if __name__ == "__main__":

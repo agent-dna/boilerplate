@@ -3,39 +3,15 @@
 Run:  python mcp_server.py   ->  http://127.0.0.1:8000/mcp
 """
 import os
-from functools import partial
 from urllib.parse import quote
 
 import httpx
-from fastmcp import FastMCP
-from agentdna.core import AgentDNA
-from agentdna.mcp.server.fastmcp import AgentDNAMCPMiddleware
 from dotenv import load_dotenv
-from cbac import authorize
-
-from wizard import environments
+from fastmcp import FastMCP
 
 load_dotenv()
 
-MCP_SERVER = AgentDNA(
-    name=os.getenv("AGENTDNA_MCP_SERVER_NAME"),
-    type="tool",
-    provenance_layer_url=environments.provenance_url(),
-    admin_server_url=environments.admin_server_url(),
-    api_key=os.getenv("AGENTDNA_API_KEY")
-)
-
-# cbac.authorize defaults to the test-prod CBAC service; bind the selected
-# environment's URL instead (e.g. cbac-service-dev for dev).
-authorize_env = partial(authorize, cbac_url=environments.cbac_url())
-
 mcp = FastMCP("free-query-apis")
-mcp.add_middleware(
-    AgentDNAMCPMiddleware(
-        MCP_SERVER,
-        authorize_env
-    )
-)
 
 HEADERS = {"User-Agent": "single-agent-langgraph-demo/0.1 (learning project)"}
 TIMEOUT = 50.0
