@@ -26,8 +26,7 @@ from wizard.audit_link import display_dashboard_info
 
 from agentdna.core import AgentDNA
 from pathlib import Path
-from agentdna.error import RESULT_OK
-from agentdna.mcp.context import agentdna_context
+from agentdna.mcp.relay import ProvenanceRelay, WorkflowRejected
 from agentdna.types import IntentWorkflow
 
 load_dotenv()
@@ -54,6 +53,12 @@ AGENT = AgentDNA(
     api_key=os.getenv("AGENTDNA_API_KEY"),
     provenance_layer_url=environments.provenance_url(),
     agent_policy_file=SKILLS_FILE
+)
+
+# Signs the agent's MCP tool calls. The agent connects to session.url("free_apis")
+# instead of the server itself; the relay forwards the calls to MCP_URL.
+PROVENANCE_RELAY = ProvenanceRelay(
+    {"free_apis": os.getenv("MCP_URL", "http://127.0.0.1:8000/mcp")}
 )
 
 # Each lookup round takes three graph steps (model, text-tool-call check, tools),
@@ -149,8 +154,8 @@ def create_llm():
     raise ValueError(f"Unsupported LLM_PROVIDER: {provider}")
 
 
-def create_agent_node(tools: list):
-    """Build the agent and return the graph node that runs it."""
+def build_agent(tools: list):
+    """Build the agent that runs the model + tools loop over the given tools."""
     tool_names = {t.name for t in tools}
 
     # Runs after every model call. If the model wrote its tool calls as text,
@@ -167,62 +172,57 @@ def create_agent_node(tools: list):
         return {"messages": [AIMessage(content="", tool_calls=text_calls, id=message.id)]}
 
     # create_agent runs the model + tools loop.
-    agent = create_agent(
+    return create_agent(
         model=create_llm(),
         tools=tools,
         system_prompt=SYSTEM_PROMPT,
         middleware=[recover_text_tool_calls],
     )
 
-    async def agent_node(state: AgentState, config: RunnableConfig) -> dict:
-        """Run the agent on the conversation and return the messages it added."""
-        # Passing config on keeps the graph's recursion limit and callbacks.
-        incoming_workflow = state["agentdna_workflow"]
-        if incoming_workflow is None:
-            raise RuntimeError("expected AgentDNA workflow from user")
 
-        verification_code = AGENT.verify(incoming_workflow)
-        if verification_code != RESULT_OK:
-            failed_msg = "authentication failed for the User"
-            failed_workflow = AGENT.build(
-                failed_msg,
-                previous_workflows=incoming_workflow,
-                verification_code=verification_code
-            )
-            AGENT.record(failed_workflow)
-            raise RuntimeError(failed_msg)
+async def agent_node(state: AgentState, config: RunnableConfig) -> dict:
+    """Run the agent on the conversation and return the messages it added."""
+    incoming_workflow = state["agentdna_workflow"]
+    if incoming_workflow is None:
+        raise RuntimeError("expected AgentDNA workflow from user")
 
-        with agentdna_context(AGENT, incoming_workflow) as ctx:
+    # The session verifies the user's workflow, then signs every tool call made
+    # through session.url(...) as AGENT. If an MCP server refuses a call, the
+    # refusal is recorded and closing the session raises ChainTerminated.
+    try:
+        async with PROVENANCE_RELAY.session(AGENT, incoming_workflow) as session:
+            # Tools are loaded per session: they must connect through its URL.
+            agent = build_agent(await load_tools(session.url("free_apis")))
+            # Passing config on keeps the graph's recursion limit and callbacks.
             result = await agent.ainvoke({"messages": state["messages"]}, config)
-            final_message = result["messages"][-1]
+    except WorkflowRejected as error:
+        failed_msg = "authentication failed for the User"
+        failed_workflow = AGENT.build(
+            failed_msg,
+            previous_workflows=incoming_workflow,
+            verification_code=error.status_code
+        )
+        AGENT.record(failed_workflow)
+        raise RuntimeError(failed_msg) from error
 
-            if len(ctx.workflows) == 0:
-                raise RuntimeError("Agent didn't get requests from other end")
+    updated_workflow = AGENT.build(
+        str(result["messages"][-1].content),
+        previous_workflows=session.workflows
+    )
 
-            updated_workflow = AGENT.build(
-                str(final_message),
-                previous_workflows=ctx.workflows
-            )
-        
-        
-        return {
-            "messages": result["messages"][len(state["messages"]):],
-            "agentdna_workflow": updated_workflow
-        }
-
-    return agent_node
+    return {
+        "messages": result["messages"][len(state["messages"]):],
+        "agentdna_workflow": updated_workflow
+    }
 
 
 async def main():
     if len(sys.argv) < 2:
         sys.exit('Usage: python agent.py "your question"')
 
-    # --- Tools from the MCP server (see mcp_client.py) ---
-    tools = await load_tools()
-
     # --- Graph ---
     builder = StateGraph(AgentState)
-    builder.add_node("agent", create_agent_node(tools))
+    builder.add_node("agent", agent_node)
     builder.add_edge(START, "agent")
     builder.add_edge("agent", END)
     graph = builder.compile()
