@@ -1,22 +1,18 @@
-"""MCP client: connects to the MCP servers the agent uses and loads their tools.
+"""MCP client: connects to the MCP server the agent uses and loads its tools.
 
-To use another MCP server, add an entry to the dictionary in `load_tools`.
+The agent passes the URL to connect to: the AgentDNA provenance relay's URL for
+the server (see agent.py), so every tool call is signed on the way through.
 """
-import os
-
 from langchain_core.tools import BaseTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
-from agentdna.mcp.client.langchain import install_mcp_client
-install_mcp_client()
 
-async def load_tools() -> list[BaseTool]:
-    """Return the tools from every configured MCP server, as LangChain tools."""
-    # MCP_URL is read here rather than at import time, so values from .env apply.
+async def load_tools(mcp_url: str) -> list[BaseTool]:
+    """Return the tools of the MCP server at mcp_url, as LangChain tools."""
     client = MultiServerMCPClient(
         {
             "free_apis": {
-                "url": os.getenv("MCP_URL", "http://127.0.0.1:8000/mcp"),
+                "url": mcp_url,
                 "transport": "streamable_http",
             }
         }

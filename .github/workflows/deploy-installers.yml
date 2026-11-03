@@ -87,38 +87,65 @@ jobs:
       - name: Check installers
         run: sh -n try.sh
 
+      # Only the dev VM logs in with a password; test-prod uses an SSH key.
       - name: Install sshpass
+        if: steps.select.outputs.environment == 'dev'
         run: |
           sudo apt-get update
           sudo apt-get install -y sshpass
 
-      - name: Configure SSH
-        run: |
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-
-          ssh-keyscan -H "${{ secrets.VM_HOST }}" >> ~/.ssh/known_hosts
-
-          chmod 644 ~/.ssh/known_hosts
-
       - name: Deploy installers
         env:
-          SSHPASS: ${{ secrets.VM_PASSWORD }}
+          ENVIRONMENT: ${{ steps.select.outputs.environment }}
+          # dev VM: password login
           VM_HOST: ${{ secrets.VM_HOST }}
           VM_USER: ${{ secrets.VM_USER }}
+          VM_PASSWORD: ${{ secrets.VM_PASSWORD }}
           VM_DEPLOY_PATH_DEV: ${{ secrets.VM_DEPLOY_PATH_DEV }}
+          # test-prod VM: key login (password login is disabled there)
+          VM_HOST_TEST_PROD: ${{ secrets.VM_HOST_TEST_PROD }}
+          VM_USER_TEST_PROD: ${{ secrets.VM_USER_TEST_PROD }}
+          VM_SSH_KEY_TEST_PROD: ${{ secrets.VM_SSH_KEY_TEST_PROD }}
           VM_DEPLOY_PATH_TEST_PROD: ${{ secrets.VM_DEPLOY_PATH_TEST_PROD }}
-          ENVIRONMENT: ${{ steps.select.outputs.environment }}
         run: |
-          # Chosen here rather than in an expression, so a missing secret fails
-          # the run instead of falling back to another environment's path.
+          # The target is chosen here rather than in an expression, so a missing
+          # secret fails the run instead of falling back to the other VM.
+          ssh_key_file="$HOME/.ssh/deploy_key"
           case "$ENVIRONMENT" in
-            dev)       deploy_path="$VM_DEPLOY_PATH_DEV" ;;
-            test-prod) deploy_path="$VM_DEPLOY_PATH_TEST_PROD" ;;
+            dev)
+              host="$VM_HOST"
+              user="$VM_USER"
+              deploy_path="$VM_DEPLOY_PATH_DEV"
+              credential="$VM_PASSWORD"
+              required="VM_HOST, VM_USER, VM_PASSWORD, VM_DEPLOY_PATH_DEV"
+              # sshpass -e reads the password from SSHPASS.
+              export SSHPASS="$VM_PASSWORD"
+              runner=(sshpass -e)
+              ssh_opts=(-o StrictHostKeyChecking=yes)
+              ;;
+            test-prod)
+              host="$VM_HOST_TEST_PROD"
+              user="$VM_USER_TEST_PROD"
+              deploy_path="$VM_DEPLOY_PATH_TEST_PROD"
+              credential="$VM_SSH_KEY_TEST_PROD"
+              required="VM_HOST_TEST_PROD, VM_USER_TEST_PROD, VM_SSH_KEY_TEST_PROD, VM_DEPLOY_PATH_TEST_PROD"
+              runner=()
+              # BatchMode: fail instead of falling back to a password prompt.
+              ssh_opts=(-o StrictHostKeyChecking=yes -o BatchMode=yes -o IdentitiesOnly=yes -i "$ssh_key_file")
+              ;;
           esac
-          if [ -z "$deploy_path" ]; then
-            echo "::error::No deploy path secret for $ENVIRONMENT (VM_DEPLOY_PATH_DEV / VM_DEPLOY_PATH_TEST_PROD)"
+          if [ -z "$host" ] || [ -z "$user" ] || [ -z "$deploy_path" ] || [ -z "$credential" ]; then
+            echo "::error::Missing deploy secret for $ENVIRONMENT; it needs $required"
             exit 1
+          fi
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          ssh-keyscan -H "$host" >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          if [ "$ENVIRONMENT" = "test-prod" ]; then
+            printf '%s\n' "$VM_SSH_KEY_TEST_PROD" > "$ssh_key_file"
+            chmod 600 "$ssh_key_file"
           fi
 
           # A folder per run, so dev and test-prod publishes do not collide.
@@ -126,24 +153,25 @@ jobs:
 
           echo "Deploying $ENVIRONMENT installers to $deploy_path"
 
-          sshpass -e ssh \
-            -o StrictHostKeyChecking=yes \
-            "${VM_USER}@${VM_HOST}" \
+          "${runner[@]}" ssh "${ssh_opts[@]}" \
+            "${user}@${host}" \
             "mkdir -p '${remote_tmp}'"
 
-          sshpass -e scp \
-            -o StrictHostKeyChecking=yes \
+          "${runner[@]}" scp "${ssh_opts[@]}" \
             try.sh \
             try.ps1 \
-            "${VM_USER}@${VM_HOST}:${remote_tmp}/"
+            "${user}@${host}:${remote_tmp}/"
 
-          sshpass -e ssh \
-            -o StrictHostKeyChecking=yes \
-            "${VM_USER}@${VM_HOST}" \
+          "${runner[@]}" ssh "${ssh_opts[@]}" \
+            "${user}@${host}" \
             "sudo mkdir -p '${deploy_path}' && \
              sudo install -m 0644 '${remote_tmp}/try.sh' '${deploy_path}/try.sh' && \
              sudo install -m 0644 '${remote_tmp}/try.ps1' '${deploy_path}/try.ps1' && \
              rm -rf '${remote_tmp}'"
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
 
       - name: Summary
         run: |

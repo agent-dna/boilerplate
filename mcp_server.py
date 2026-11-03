@@ -33,7 +33,7 @@ mcp = FastMCP("free-query-apis")
 mcp.add_middleware(
     AgentDNAMCPMiddleware(
         MCP_SERVER,
-        authorize_env
+        cbac_fn=authorize_env
     )
 )
 
