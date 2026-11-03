@@ -87,91 +87,81 @@ jobs:
       - name: Check installers
         run: sh -n try.sh
 
-      # Only the dev VM logs in with a password; test-prod uses an SSH key.
       - name: Install sshpass
         if: steps.select.outputs.environment == 'dev'
         run: |
           sudo apt-get update
           sudo apt-get install -y sshpass
 
-      - name: Deploy installers
+      # Sets DEPLOY_HOST, DEPLOY_USER, DEPLOY_PATH, SSH_CMD and SCP_CMD for the
+      # next steps.
+      # dev:       password login (sshpass)
+      # test-prod: key login (password login is disabled on that VM)
+      # Both connect only to the host key pinned in the environment's secret.
+      - name: Configure SSH
         env:
           ENVIRONMENT: ${{ steps.select.outputs.environment }}
-          # dev VM: password login
-          VM_HOST: ${{ secrets.VM_HOST }}
-          VM_USER: ${{ secrets.VM_USER }}
-          VM_PASSWORD: ${{ secrets.VM_PASSWORD }}
-          VM_DEPLOY_PATH_DEV: ${{ secrets.VM_DEPLOY_PATH_DEV }}
-          # test-prod VM: key login (password login is disabled there)
-          VM_HOST_TEST_PROD: ${{ secrets.VM_HOST_TEST_PROD }}
-          VM_USER_TEST_PROD: ${{ secrets.VM_USER_TEST_PROD }}
-          VM_SSH_KEY_TEST_PROD: ${{ secrets.VM_SSH_KEY_TEST_PROD }}
-          VM_DEPLOY_PATH_TEST_PROD: ${{ secrets.VM_DEPLOY_PATH_TEST_PROD }}
+          DEV_HOST: ${{ secrets.VM_HOST }}
+          DEV_USER: ${{ secrets.VM_USER }}
+          DEV_PASSWORD: ${{ secrets.VM_PASSWORD }}
+          DEV_KNOWN_HOSTS: ${{ secrets.VM_KNOWN_HOSTS }}
+          DEV_DEPLOY_PATH: ${{ secrets.VM_DEPLOY_PATH_DEV }}
+          TEST_PROD_HOST: ${{ secrets.VM_HOST_TEST_PROD }}
+          TEST_PROD_USER: ${{ secrets.VM_USER_TEST_PROD }}
+          TEST_PROD_SSH_KEY: ${{ secrets.VM_SSH_KEY_TEST_PROD }}
+          TEST_PROD_KNOWN_HOSTS: ${{ secrets.VM_KNOWN_HOSTS_TEST_PROD }}
+          TEST_PROD_DEPLOY_PATH: ${{ secrets.VM_DEPLOY_PATH_TEST_PROD }}
         run: |
-          # The target is chosen here rather than in an expression, so a missing
-          # secret fails the run instead of falling back to the other VM.
-          ssh_key_file="$HOME/.ssh/deploy_key"
+          install -m 700 -d ~/.ssh
+          # Chosen here rather than in an expression, so a missing secret fails
+          # the run instead of falling back to the other environment's VM.
           case "$ENVIRONMENT" in
             dev)
-              host="$VM_HOST"
-              user="$VM_USER"
-              deploy_path="$VM_DEPLOY_PATH_DEV"
-              credential="$VM_PASSWORD"
-              required="VM_HOST, VM_USER, VM_PASSWORD, VM_DEPLOY_PATH_DEV"
-              # sshpass -e reads the password from SSHPASS.
-              export SSHPASS="$VM_PASSWORD"
-              runner=(sshpass -e)
-              ssh_opts=(-o StrictHostKeyChecking=yes)
+              host="$DEV_HOST"; user="$DEV_USER"; known_hosts="$DEV_KNOWN_HOSTS"
+              deploy_path="$DEV_DEPLOY_PATH"; credential="$DEV_PASSWORD"
+              runner="sshpass -e"
+              ssh_opts="-o StrictHostKeyChecking=yes -o PreferredAuthentications=password -o PubkeyAuthentication=no"
               ;;
             test-prod)
-              host="$VM_HOST_TEST_PROD"
-              user="$VM_USER_TEST_PROD"
-              deploy_path="$VM_DEPLOY_PATH_TEST_PROD"
-              credential="$VM_SSH_KEY_TEST_PROD"
-              required="VM_HOST_TEST_PROD, VM_USER_TEST_PROD, VM_SSH_KEY_TEST_PROD, VM_DEPLOY_PATH_TEST_PROD"
-              runner=()
-              # BatchMode: fail instead of falling back to a password prompt.
-              ssh_opts=(-o StrictHostKeyChecking=yes -o BatchMode=yes -o IdentitiesOnly=yes -i "$ssh_key_file")
+              host="$TEST_PROD_HOST"; user="$TEST_PROD_USER"; known_hosts="$TEST_PROD_KNOWN_HOSTS"
+              deploy_path="$TEST_PROD_DEPLOY_PATH"; credential="$TEST_PROD_SSH_KEY"
+              (umask 077 && printf '%s\n' "$TEST_PROD_SSH_KEY" > ~/.ssh/deploy_key)
+              runner=""
+              ssh_opts="-i $HOME/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o PreferredAuthentications=publickey -o PasswordAuthentication=no"
               ;;
           esac
-          if [ -z "$host" ] || [ -z "$user" ] || [ -z "$deploy_path" ] || [ -z "$credential" ]; then
-            echo "::error::Missing deploy secret for $ENVIRONMENT; it needs $required"
+          # Fail early instead of connecting with an empty host or credential.
+          if [ -z "$host" ] || [ -z "$user" ] || [ -z "$known_hosts" ] || [ -z "$deploy_path" ] || [ -z "$credential" ]; then
+            echo "::error::Deploy secrets for $ENVIRONMENT are missing; see .github/workflows/DEPLOY.md"
             exit 1
           fi
-
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          ssh-keyscan -H "$host" >> ~/.ssh/known_hosts
+          # The VM's host key is pinned through a secret instead of trusting
+          # whatever answers ssh-keyscan.
+          printf '%s\n' "$known_hosts" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
-          if [ "$ENVIRONMENT" = "test-prod" ]; then
-            printf '%s\n' "$VM_SSH_KEY_TEST_PROD" > "$ssh_key_file"
-            chmod 600 "$ssh_key_file"
-          fi
+          {
+            echo "DEPLOY_HOST=$host"
+            echo "DEPLOY_USER=$user"
+            echo "DEPLOY_PATH=$deploy_path"
+            echo "SSH_CMD=$runner ssh $ssh_opts"
+            echo "SCP_CMD=$runner scp $ssh_opts"
+          } >> "$GITHUB_ENV"
 
-          # A folder per run, so dev and test-prod publishes do not collide.
-          remote_tmp="/tmp/agentdna-installers-${ENVIRONMENT}-${GITHUB_RUN_ID}"
+      - name: Create target folder
+        env:
+          # dev only. Read by sshpass -e; never passed on the command line.
+          SSHPASS: ${{ steps.select.outputs.environment == 'dev' && secrets.VM_PASSWORD || '' }}
+        run: |
+          $SSH_CMD "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH'"
 
-          echo "Deploying $ENVIRONMENT installers to $deploy_path"
-
-          "${runner[@]}" ssh "${ssh_opts[@]}" \
-            "${user}@${host}" \
-            "mkdir -p '${remote_tmp}'"
-
-          "${runner[@]}" scp "${ssh_opts[@]}" \
-            try.sh \
-            try.ps1 \
-            "${user}@${host}:${remote_tmp}/"
-
-          "${runner[@]}" ssh "${ssh_opts[@]}" \
-            "${user}@${host}" \
-            "sudo mkdir -p '${deploy_path}' && \
-             sudo install -m 0644 '${remote_tmp}/try.sh' '${deploy_path}/try.sh' && \
-             sudo install -m 0644 '${remote_tmp}/try.ps1' '${deploy_path}/try.ps1' && \
-             rm -rf '${remote_tmp}'"
-
-      - name: Remove SSH key
-        if: always()
-        run: rm -f ~/.ssh/deploy_key
+      - name: Copy installers
+        env:
+          SSHPASS: ${{ steps.select.outputs.environment == 'dev' && secrets.VM_PASSWORD || '' }}
+        run: |
+          echo "Deploying ${{ steps.select.outputs.environment }} installers to $DEPLOY_PATH"
+          $SCP_CMD try.sh try.ps1 "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+          # try.sh is executable in the repository; the served files need not be.
+          $SSH_CMD "$DEPLOY_USER@$DEPLOY_HOST" "chmod 644 '$DEPLOY_PATH/try.sh' '$DEPLOY_PATH/try.ps1'"
 
       - name: Summary
         run: |
