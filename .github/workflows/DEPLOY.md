@@ -1,8 +1,8 @@
 # Installer deploy workflow
 
 `deploy-installers.yml` publishes `try.sh` and `try.ps1` to the AgentDNA
-servers: each environment has its own VM and deploy path. The installers are published as they
-are in the repository: they are the same for every environment, clone the
+servers over SSH: each environment has its own VM and deploy path. The
+installers are published as they are in the repository: they are the same for every environment, clone the
 `main` branch, and do not set the AgentDNA environment. The wizard takes that
 from `AGENTDNA_ENV` in the shell or `.env` (default `test-prod`).
 
@@ -31,54 +31,108 @@ from `AGENTDNA_ENV` in the shell or `.env` (default `test-prod`).
    chosen environment and uses the head of its branch.
 2. **Checkout** that commit.
 3. **Check installers:** `sh -n try.sh` (shell syntax).
-4. **Install sshpass** (dev only, for its password login).
-5. **Deploy:** picks the environment's VM, user, credential and deploy path,
-   adds the VM's host key to `known_hosts` (and, for test-prod, writes the SSH
-   key to a file), copies the two files to a per-run temporary folder on the
-   VM, then installs them (mode `0644`) into the deploy path.
-6. **Remove SSH key:** deletes the key file, even when an earlier step failed.
+4. **Install sshpass** (`dev` only).
+5. **Configure SSH:** selects the environment's VM, user, login method and
+   deploy path, writes the SSH key (`test-prod` only) and the pinned VM host
+   key, and fails if any of the environment's secrets is missing.
+6. **Create target folder** (`mkdir -p`) if it does not exist.
+7. **Copy installers** into it with `scp`, then sets them to mode `0644`.
+
+No step uses `sudo`: the SSH user must be able to write to the deploy path
+(see *VM prerequisites*).
 
 ## Configuration
 
-### Repository secrets
+### 1. Repository secrets
 
-*Settings*, *Secrets and variables*, *Actions*:
+*Settings*, *Secrets and variables*, *Actions*, *New repository secret*:
 
-dev VM (password login):
+`dev` (password login):
 
 | Secret | Value |
 |--------|-------|
-| `VM_HOST` | dev VM hostname or IP address |
+| `VM_HOST` | Dev VM hostname or IP address |
 | `VM_USER` | SSH user |
 | `VM_PASSWORD` | SSH password of that user |
+| `VM_KNOWN_HOSTS` | The dev VM's SSH host key line(s), see step 2 |
 | `VM_DEPLOY_PATH_DEV` | Folder served as the dev installer URL |
 
-test-prod VM (key login; password login is disabled on it):
+`test-prod` (key login; password login is disabled on that VM):
 
 | Secret | Value |
 |--------|-------|
-| `VM_HOST_TEST_PROD` | test-prod VM hostname or IP address |
-| `VM_USER_TEST_PROD` | SSH user |
-| `VM_SSH_KEY_TEST_PROD` | Private key of that user, the whole file including the `-----BEGIN ... KEY-----` and `-----END ... KEY-----` lines. It must have no passphrase. |
+| `VM_HOST_TEST_PROD` | Test-prod VM hostname or IP address |
+| `VM_USER_TEST_PROD` | SSH user on that VM |
+| `VM_SSH_KEY_TEST_PROD` | Private key of that user, the full file including the `-----BEGIN`/`-----END` lines; see step 3 |
+| `VM_KNOWN_HOSTS_TEST_PROD` | The test-prod VM's SSH host key line(s), see step 2 |
 | `VM_DEPLOY_PATH_TEST_PROD` | Folder served as the test-prod installer URL |
 
 The target is chosen in a shell step, so a missing secret fails the run
 instead of publishing to the other environment's VM or folder.
 
-### VM setup
+`VM_PASSWORD` is passed to `sshpass` through the `SSHPASS` environment
+variable and never appears on a command line. The private key is written to
+`~/.ssh/deploy_key` (mode 600) on the runner, which is discarded after the
+job. GitHub masks secret values in the logs.
 
-On each VM, the SSH user needs passwordless `sudo` (the deploy runs
-`sudo mkdir` and `sudo install` without a terminal). On the test-prod VM, add
-the public half of `VM_SSH_KEY_TEST_PROD` to that user's
-`~/.ssh/authorized_keys`. A key used only for this deploy is best:
+### 2. Host keys (`VM_KNOWN_HOSTS`, `VM_KNOWN_HOSTS_TEST_PROD`)
+
+SSH connects only if the VM presents this key (`StrictHostKeyChecking=yes`),
+which prevents connecting to an impostor. Do this once per VM, with that VM's
+host:
+
+1. From a machine that already trusts the VM, run:
+
+   ```bash
+   ssh-keyscan -H <host>
+   ```
+
+2. Compare the fingerprint with the one on the VM:
+
+   ```bash
+   # on the VM
+   ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+   # locally, on the keyscan output
+   ssh-keyscan <host> 2>/dev/null | ssh-keygen -lf -
+   ```
+
+3. If they match, paste the full `ssh-keyscan -H` output as the secret value.
+
+Update the secret whenever the VM's host keys change (for example after
+reinstalling it), otherwise deploys fail with `Host key verification failed`.
+
+### 3. Deploy key (`VM_SSH_KEY_TEST_PROD`)
+
+Use a dedicated key without a passphrase, so it can be revoked on its own:
 
 ```bash
-ssh-keygen -t ed25519 -N "" -C "github-deploy-installers" -f deploy_key
-# deploy_key.pub  -> ~/.ssh/authorized_keys of the user on the test-prod VM
-# deploy_key      -> secret VM_SSH_KEY_TEST_PROD (then delete the local copy)
+ssh-keygen -t ed25519 -N '' -C 'github-deploy boilerplate installers' -f deploy_key
 ```
 
-### Branches
+1. Append `deploy_key.pub` to `~/.ssh/authorized_keys` of `VM_USER_TEST_PROD`
+   on the test-prod VM.
+2. Paste the content of `deploy_key` (the private key) as the
+   `VM_SSH_KEY_TEST_PROD` secret.
+3. Delete the local `deploy_key` file.
+
+To revoke it, remove its line from `authorized_keys`.
+
+### 4. VM prerequisites
+
+On both VMs, the SSH user can create and write the deploy path (the workflow
+runs `mkdir -p` on it and copies into it, without `sudo`). If the folder must
+live somewhere the user cannot write, create it once and hand it over:
+
+```bash
+sudo mkdir -p <deploy path>
+sudo chown <SSH user> <deploy path>
+```
+
+`dev`: password login allowed for `VM_USER` over SSH
+(`PasswordAuthentication yes`, and `PermitRootLogin yes` for `root`, in
+`/etc/ssh/sshd_config`).
+
+### 5. Branches
 
 The `develop` branch must exist on GitHub for the dev trigger (pull requests
 merged into it publish the dev installers):
@@ -95,15 +149,18 @@ git push -u origin develop
 |---------|---------------|
 | Workflow does not run after a merge | The pull request targeted a branch other than `develop` or `main`. |
 | *Select environment* fails with `Installers are published from develop (dev) or main (test-prod)` | Should not happen with the configured triggers: only pull requests into `develop` or `main` start the workflow. Check `on.pull_request.branches` if the triggers were changed. |
-| `Missing deploy secret for dev` (or `test-prod`) | Add the secrets the message lists (see *Repository secrets*). |
-| test-prod: `Permission denied (publickey)` | The public key is not in `authorized_keys` of `VM_USER_TEST_PROD`, or `VM_SSH_KEY_TEST_PROD` is not the whole private key file, or the key has a passphrase. |
-| `sudo: a terminal is required` / `a password is required` | The SSH user needs passwordless `sudo` on that VM (see *VM setup*). |
+| *Configure SSH* fails with `Deploy secrets for <environment> are missing` | One of that environment's secrets is not set (step 1). |
+| `Host key verification failed` | The environment's `VM_KNOWN_HOSTS*` secret is wrong or outdated. Regenerate it (step 2). |
+| `Permission denied (publickey,password)` on `dev` | Wrong `VM_USER` or `VM_PASSWORD`, or password login disabled on the VM. |
+| `Permission denied (publickey)` on `test-prod` | Wrong `VM_USER_TEST_PROD`, or the public key of `VM_SSH_KEY_TEST_PROD` is not in that user's `authorized_keys` (step 3). |
+| `Load key ... invalid format` | `VM_SSH_KEY_TEST_PROD` is incomplete. Paste the whole private key file, including the `BEGIN`/`END` lines. |
+| `mkdir: cannot create directory` or `scp: ... Permission denied` | The SSH user cannot write to the deploy path (step 4). |
 
 ## Adding an environment
 
 1. Add it to `ENVIRONMENTS` in `wizard/environments.py`.
 2. If it gets its own installer location: map its branch in the *Select
-   environment* step, add a `case` entry with its VM, user,
-   credential and deploy path secrets in the *Deploy installers* step of
-   `deploy-installers.yml`, and add the branch to
-   `on.pull_request.branches`.
+   environment* step, add a `case` entry with its VM, user, login method,
+   host key and deploy path in the *Configure SSH* step of
+   `deploy-installers.yml` (and its secrets to that step's `env` block), and
+   add the branch to `on.pull_request.branches`.
