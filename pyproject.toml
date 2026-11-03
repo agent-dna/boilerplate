@@ -13,7 +13,7 @@ dependencies = [
     "python-dotenv",
     "questionary",
     "rich",
-    "agent-dna",
+    "agent-dna>=0.6.0",
     "cbac"
 ]
 
